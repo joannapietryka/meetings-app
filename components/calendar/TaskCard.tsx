@@ -10,15 +10,17 @@ interface TaskCardProps {
   onDragStart: (e: React.DragEvent, taskId: string) => void
   onDelete: (taskId: string) => void
   isLocked?: boolean
+  onClickTask?: (task: Task) => void
 }
 
-export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false }: TaskCardProps) {
+export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
   const colors = CATEGORY_COLORS[task.category]
 
   return (
     <div
       draggable={!isLocked}
       onDragStart={isLocked ? undefined : (e) => onDragStart(e, task.id)}
+      onClick={onClickTask ? () => onClickTask(task) : undefined}
       className={`group relative rounded-lg px-2 py-1.5 select-none transition-all duration-200 w-full overflow-hidden ${
         isLocked ? "cursor-default opacity-70" : "cursor-grab active:cursor-grabbing hover:brightness-110"
       }`}

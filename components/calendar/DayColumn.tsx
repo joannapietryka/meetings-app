@@ -23,6 +23,7 @@ interface DayColumnProps {
   onDelete: (taskId: string) => void
   onAddTask: (dateStr: string, time?: string) => void
   onWeekendHover?: () => void
+  onClickTask?: (task: Task) => void
 }
 
 function slotToTime(slot: number): string {
@@ -55,6 +56,7 @@ export function DayColumn({
   onDelete,
   onAddTask,
   onWeekendHover,
+  onClickTask,
 }: DayColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -233,6 +235,7 @@ export function DayColumn({
                 onDragStart={onDragStart}
                 onDelete={onDelete}
                 isLocked={isLocked}
+                onClickTask={onClickTask}
               />
             </div>
           )
@@ -249,6 +252,7 @@ export function DayColumn({
               onDragStart={onDragStart}
               onDelete={onDelete}
               isLocked={isLocked}
+              onClickTask={onClickTask}
             />
           ))}
         </div>

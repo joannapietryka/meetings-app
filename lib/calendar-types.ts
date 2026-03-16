@@ -1,4 +1,4 @@
-export type TaskCategory = "work" | "personal" | "health" | "other"
+export type TaskCategory = "bed1" | "bed2" | "contract" | "other"
 
 export interface Task {
   id: string
@@ -18,17 +18,17 @@ export const TOTAL_SLOTS = ((CALENDAR_END_HOUR - CALENDAR_START_HOUR) * 60) / SL
 export const SLOT_HEIGHT_PX = 40 // px per 30-min slot
 
 export const CATEGORY_COLORS: Record<TaskCategory, { bg: string; border: string; dot: string }> = {
-  work: {
+  bed1: {
     bg: "rgba(199, 210, 254, 0.55)",
     border: "rgba(99, 102, 241, 0.3)",
     dot: "#4338ca",
   },
-  personal: {
+  bed2: {
     bg: "rgba(254, 215, 170, 0.55)",
     border: "rgba(217, 119, 6, 0.3)",
     dot: "#d97706",
   },
-  health: {
+  contract: {
     bg: "rgba(167, 243, 208, 0.55)",
     border: "rgba(5, 150, 105, 0.3)",
     dot: "#059669",

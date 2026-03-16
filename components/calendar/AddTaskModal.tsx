@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { X } from "lucide-react"
 import { format, addDays, startOfDay, isWeekend, isBefore, isAfter, addHours, parseISO } from "date-fns"
 import type { Task, TaskCategory } from "@/lib/calendar-types"
@@ -18,13 +18,19 @@ interface AddTaskModalProps {
     date: string
     time?: string
     duration?: number
+    email?: string
   }) => void
+  initialTitle?: string
+  initialDescription?: string
+  initialCategory?: TaskCategory
+  showEmailField?: boolean
+  initialEmail?: string
 }
 
 const CATEGORIES: { value: TaskCategory; label: string }[] = [
-  { value: "work", label: "1-bed viewing" },
-  { value: "personal", label: "2-beds viewing" },
-  { value: "health", label: "Contract signing" },
+  { value: "bed1", label: "1-bed viewing" },
+  { value: "bed2", label: "2-beds viewing" },
+  { value: "contract", label: "Contract signing" },
   { value: "other", label: "Other" },
 ]
 
@@ -47,6 +53,14 @@ function generateTimeSlots(): string[] {
 }
 
 const ALL_TIME_SLOTS = generateTimeSlots()
+
+function fitsInDay(time: string, durationMinutes: number): boolean {
+  const [h, m] = time.split(":").map(Number)
+  const startMinutes = h * 60 + m
+  const endMinutes = startMinutes + durationMinutes
+  const dayEndMinutes = CALENDAR_END_HOUR * 60
+  return endMinutes <= dayEndMinutes
+}
 
 // Generate available dates: next 14 days (weekdays only)
 function generateAvailableDates(): { date: Date; dateStr: string; label: string }[] {
@@ -74,8 +88,14 @@ export function AddTaskModal({
   defaultTime, 
   existingTasks,
   onClose, 
-  onAdd 
+  onAdd,
+  initialTitle,
+  initialDescription,
+  initialCategory,
+  showEmailField,
+  initialEmail,
 }: AddTaskModalProps) {
+  const isEditing = !!initialTitle
   const availableDates = useMemo(() => generateAvailableDates(), [])
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(now), [now])
@@ -100,12 +120,21 @@ export function AddTaskModal({
     return found ? defaultDate : availableDates[0]?.dateStr ?? defaultDate
   }, [defaultDate, availableDates])
 
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
-  const [category, setCategory] = useState<TaskCategory>("work")
+  const [title, setTitle] = useState(initialTitle ?? "")
+  const [description, setDescription] = useState(initialDescription ?? "")
+  const [category, setCategory] = useState<TaskCategory>(initialCategory ?? "bed1")
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
   const [time, setTime] = useState(defaultTime && ALL_TIME_SLOTS.includes(defaultTime) ? defaultTime : "09:00")
   const [duration, setDuration] = useState(30)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [email, setEmail] = useState(initialEmail ?? "")
+  const [emailError, setEmailError] = useState<string | null>(null)
+
+  const isValidEmail = (value: string) => {
+    // Simple RFC5322-ish email check: something@something.something
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  }
 
   // Get blocked time slots for the selected date
   const blockedSlots = useMemo(() => {
@@ -137,6 +166,20 @@ export function AddTaskModal({
     return blocked
   }, [selectedDate, existingTasks])
 
+  // For new meetings without an explicit defaultTime, prefill with the next available slot
+  useEffect(() => {
+    if (isEditing) return
+    if (defaultTime) return
+
+    for (const slot of ALL_TIME_SLOTS) {
+      if (!isSlotWithinBookingWindow(selectedDate, slot)) continue
+      if (blockedSlots.has(slot)) continue
+      if (!fitsInDay(slot, duration)) continue
+      setTime(slot)
+      break
+    }
+  }, [isEditing, defaultTime, selectedDate, blockedSlots, duration])
+
   // Check if the selected time + duration would conflict
   const wouldConflict = useMemo(() => {
     if (!time) return false
@@ -157,11 +200,38 @@ export function AddTaskModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim()) return
-    if (wouldConflict) {
+    if (isSubmitting) return
+    if (!title.trim()) {
+      setNameError("Please enter the guest name.")
+      return
+    }
+
+    if (showEmailField) {
+      const trimmed = email.trim()
+      if (!trimmed) {
+        setEmailError("Please enter the guest email.")
+        return
+      }
+      if (!isValidEmail(trimmed)) {
+        setEmailError("Please enter a valid email address.")
+        return
+      }
+    }
+
+    // Ensure the chosen duration fits before end of day (17:00)
+    if (!fitsInDay(time, duration)) {
+      alert("This meeting would end after 17:00. Please choose an earlier time or shorter duration.")
+      return
+    }
+
+    if (!initialTitle && wouldConflict) {
+      // Only enforce conflict rule when creating a new meeting.
       alert("This time slot is already booked. Please choose a different time or duration.")
       return
     }
+    setIsSubmitting(true)
+    setNameError(null)
+    setEmailError(null)
     onAdd({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -169,6 +239,7 @@ export function AddTaskModal({
       date: selectedDate,
       time: time || undefined,
       duration,
+      email: showEmailField ? email.trim() : undefined,
     })
     onClose()
   }
@@ -197,7 +268,9 @@ export function AddTaskModal({
         }}
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-slate-800 text-lg font-bold font-sans">New Meeting</h2>
+          <h2 className="text-slate-800 text-lg font-bold font-sans">
+            {isEditing ? "Edit Meeting" : "New Meeting"}
+          </h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-black/10 transition-colors"
@@ -208,21 +281,51 @@ export function AddTaskModal({
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Title */}
+          {/* Name */}
           <div>
             <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Title
+              Name
             </label>
             <input
               autoFocus
-              required
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="What needs to be done?"
+              onChange={(e) => {
+                setTitle(e.target.value)
+                if (nameError) setNameError(null)
+              }}
+              placeholder="e.g. Anna Kowalska"
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
               style={inputStyle}
             />
+            {nameError && (
+              <p className="mt-1 text-[11px] text-red-600 font-sans">
+                {nameError}
+              </p>
+            )}
           </div>
+
+          {showEmailField && (
+            <div>
+              <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
+                Email
+              </label>
+              <input
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  if (emailError) setEmailError(null)
+                }}
+                placeholder="guest@example.com"
+                className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
+                style={inputStyle}
+              />
+              {emailError && (
+                <p className="mt-1 text-[11px] text-red-600 font-sans">
+                  {emailError}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Date selector */}
           <div>
@@ -285,12 +388,27 @@ export function AddTaskModal({
                 <button
                   key={d.value}
                   type="button"
-                  onClick={() => setDuration(d.value)}
+                  onClick={() => {
+                    if (!fitsInDay(time, d.value)) return
+                    setDuration(d.value)
+                  }}
                   className="flex-1 py-1.5 rounded-lg text-xs font-semibold font-sans transition-all duration-150"
                   style={{
-                    background: duration === d.value ? "rgba(12,17,91,0.12)" : "rgba(0,0,0,0.05)",
-                    border: duration === d.value ? "1px solid rgba(12,17,91,0.4)" : "1px solid rgba(0,0,0,0.1)",
-                    color: duration === d.value ? "#0C115B" : "#64748b",
+                    background: !fitsInDay(time, d.value)
+                      ? "rgba(0,0,0,0.02)"
+                      : duration === d.value
+                      ? "rgba(12,17,91,0.12)"
+                      : "rgba(0,0,0,0.05)",
+                    border: !fitsInDay(time, d.value)
+                      ? "1px solid rgba(0,0,0,0.05)"
+                      : duration === d.value
+                      ? "1px solid rgba(12,17,91,0.4)"
+                      : "1px solid rgba(0,0,0,0.1)",
+                    color: !fitsInDay(time, d.value)
+                      ? "#cbd5f5"
+                      : duration === d.value
+                      ? "#0C115B"
+                      : "#64748b",
                   }}
                 >
                   {d.label}
@@ -299,8 +417,8 @@ export function AddTaskModal({
             </div>
           </div>
 
-          {/* Conflict warning */}
-          {wouldConflict && (
+          {/* Conflict warning (only when creating a new meeting) */}
+          {!isEditing && wouldConflict && (
             <div 
               className="px-3 py-2 rounded-lg text-xs font-sans"
               style={{
@@ -363,7 +481,7 @@ export function AddTaskModal({
           {/* Submit */}
           <button
             type="submit"
-            disabled={wouldConflict}
+            disabled={(!isEditing && wouldConflict) || isSubmitting}
             className="w-full py-3 rounded-xl font-bold font-sans text-sm transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             style={{
               backgroundColor: "#0C115B",
@@ -372,7 +490,7 @@ export function AddTaskModal({
               border: "1px solid rgba(12,17,91,0.6)",
             }}
           >
-            Add Meeting
+            {isSubmitting ? "Adding..." : "Add Meeting"}
           </button>
         </form>
       </div>
