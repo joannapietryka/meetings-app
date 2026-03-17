@@ -13,6 +13,14 @@ export default i.schema({
       createdAt: i.string().optional(),
       userId: i.string().optional(),
       userEmail: i.string().optional(),
+      status: i.string().optional(), // 'confirmed' | 'not_confirmed'
+      updatedAt: i.string().optional(),
+      lastEditedBy: i.string().optional(), // 'admin' | 'guest'
+      previousDate: i.string().optional(),
+      previousTime: i.string().optional(),
+      previousDuration: i.number().optional(),
+      changeRequestedAt: i.string().optional(),
+      remindedAt: i.string().optional(),
     }),
   },
   links: {

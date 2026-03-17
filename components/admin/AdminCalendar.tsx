@@ -27,6 +27,15 @@ type Meeting = {
   time?: string
   duration?: number
   createdAt?: string
+  userId?: string
+  userEmail?: string
+  status?: "confirmed" | "not_confirmed" | string
+  updatedAt?: string
+  lastEditedBy?: "admin" | "guest" | string
+  previousDate?: string
+  previousTime?: string
+  previousDuration?: number
+  changeRequestedAt?: string
 }
 
 function toDateStr(date: Date): string {
@@ -153,6 +162,12 @@ export function AdminCalendar() {
     e.preventDefault()
     if (!draggingId.current) return
 
+    const moving = meetings.find((m) => m.id === draggingId.current)
+    if (!moving) {
+      draggingId.current = null
+      return
+    }
+
     const relativeY = e.clientY - dragOffsetY.current - gridTop
     const slotIndex = Math.max(0, Math.min(TOTAL_SLOTS - 1, Math.floor(relativeY / SLOT_HEIGHT_PX)))
     const totalMinutes = CALENDAR_START_HOUR * 60 + slotIndex * SLOT_MINUTES
@@ -172,10 +187,18 @@ export function AdminCalendar() {
       return
     }
 
+    const nowIso = new Date().toISOString()
     db.transact(
       db.tx.meetings[draggingId.current].update({
+        previousDate: moving.date,
+        previousTime: moving.time,
+        previousDuration: moving.duration,
         date: targetDate,
         time: newTime,
+        status: "not_confirmed",
+        changeRequestedAt: nowIso,
+        lastEditedBy: "admin",
+        updatedAt: nowIso,
       })
     ).catch((err: any) => {
       console.error("InstantDB error (admin drag)", err)
@@ -202,15 +225,35 @@ export function AdminCalendar() {
     email?: string
   }) => {
     if (editing) {
+      const nowIso = new Date().toISOString()
+      const dateTimeChanged = editing.date !== payload.date || (editing.time ?? "") !== (payload.time ?? "")
+      const durationChanged = (editing.duration ?? null) !== (payload.duration ?? null)
+      const needsConfirmation = dateTimeChanged || durationChanged
+
       db.transact([
         (db.tx.meetings as any)[editing.id].update({
           title: payload.title,
           description: payload.description,
           category: payload.category,
-          date: payload.date,
-          time: payload.time,
-          duration: payload.duration,
+          ...(needsConfirmation
+            ? {
+                previousDate: editing.date,
+                previousTime: editing.time,
+                previousDuration: editing.duration,
+                date: payload.date,
+                time: payload.time,
+                duration: payload.duration,
+                status: "not_confirmed",
+                changeRequestedAt: nowIso,
+              }
+            : {
+                date: payload.date,
+                time: payload.time,
+                duration: payload.duration,
+              }),
           userEmail: payload.email,
+          lastEditedBy: "admin",
+          updatedAt: nowIso,
         }),
       ])
         .then(() => {
