@@ -4,7 +4,15 @@ import { useMemo, useRef, useState } from "react"
 import { addDays, addHours, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban } from "lucide-react"
 import type { TaskCategory } from "@/lib/calendar-types"
-import { CALENDAR_START_HOUR, CALENDAR_END_HOUR, SLOT_HEIGHT_PX, SLOT_MINUTES, TOTAL_SLOTS } from "@/lib/calendar-types"
+import {
+  CALENDAR_START_HOUR,
+  CALENDAR_END_HOUR,
+  SLOT_HEIGHT_PX,
+  SLOT_MINUTES,
+  TOTAL_SLOTS,
+  CATEGORY_COLORS,
+  CATEGORY_LABELS,
+} from "@/lib/calendar-types"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
 import { DayColumn } from "@/components/calendar/DayColumn"
@@ -169,13 +177,19 @@ export function AdminCalendar() {
         date: targetDate,
         time: newTime,
       })
-    )
+    ).catch((err: any) => {
+      console.error("InstantDB error (admin drag)", err)
+      alert(err?.body?.message ?? err?.message ?? "Could not move the meeting.")
+    })
 
     draggingId.current = null
   }
 
   const handleDelete = (meetingId: string) => {
-    db.transact(db.tx.meetings[meetingId].delete())
+    db.transact(db.tx.meetings[meetingId].delete()).catch((err: any) => {
+      console.error("InstantDB error (admin delete)", err)
+      alert(err?.body?.message ?? err?.message ?? "Could not delete the meeting.")
+    })
   }
 
   const handleAddMeeting = (payload: {
@@ -324,22 +338,15 @@ export function AdminCalendar() {
 
       <main className="relative z-10 flex-1 px-6 pb-4 overflow-auto">
         <div className="flex items-center gap-5 mb-3 px-1">
-          {(["bed1", "bed2", "contract", "other"] as const).map((cat) => {
-            const label =
-              cat === "bed1"
-                ? "1-bed viewing"
-                : cat === "bed2"
-                ? "2-beds viewing"
-                : cat === "contract"
-                ? "Contract signing"
-                : "Other"
+          {(Object.keys(CATEGORY_LABELS) as TaskCategory[]).map((cat) => {
+            const label = CATEGORY_LABELS[cat]
+            const colors = CATEGORY_COLORS[cat]
             return (
               <div key={cat} className="flex items-center gap-1.5">
                 <span
                   className="w-2 h-2 rounded-full"
                   style={{
-                    backgroundColor:
-                      cat === "bed1" ? "#4338ca" : cat === "bed2" ? "#d97706" : cat === "contract" ? "#059669" : "#9ca3af",
+                    backgroundColor: colors.dot,
                   }}
                 />
                 <span className="text-slate-600 text-[11px] font-sans">{label}</span>
@@ -437,7 +444,12 @@ export function AdminCalendar() {
       {/* Bottom bar with logout */}
       <footer className="px-6 pb-6 flex justify-end">
         <button
-          onClick={() => db.auth.signOut()}
+          onClick={() => {
+            db.auth.signOut().catch((err: any) => {
+              console.error("InstantDB error (admin sign out)", err)
+              alert(err?.body?.message ?? err?.message ?? "Could not sign out.")
+            })
+          }}
           className="px-4 py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
           style={{
             backgroundColor: "#0C115B",

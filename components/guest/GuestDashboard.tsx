@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
 import type { TaskCategory } from "@/lib/calendar-types"
+import { CATEGORY_LABELS } from "@/lib/calendar-types"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
 type Meeting = {
@@ -17,13 +18,6 @@ type Meeting = {
   createdAt?: string
   userId?: string
   userEmail?: string
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  bed1: "1-bed viewing",
-  bed2: "2-beds viewing",
-  contract: "Contract signing",
-  other: "Other",
 }
 
 function toDateTime(m: Meeting): number {
@@ -157,7 +151,12 @@ export function GuestDashboard() {
       {/* Bottom bar with logout */}
       <footer className="px-4 pb-4 flex justify-end">
         <button
-          onClick={() => db.auth.signOut()}
+          onClick={() => {
+            db.auth.signOut().catch((err: any) => {
+              console.error("InstantDB error (guest sign out)", err)
+              alert(err?.body?.message ?? err?.message ?? "Could not sign out.")
+            })
+          }}
           className="px-4 py-3 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
           style={{
             backgroundColor: "#0C115B",

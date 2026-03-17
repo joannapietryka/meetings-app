@@ -17,6 +17,13 @@ export const SLOT_MINUTES = 30
 export const TOTAL_SLOTS = ((CALENDAR_END_HOUR - CALENDAR_START_HOUR) * 60) / SLOT_MINUTES // 16 slots
 export const SLOT_HEIGHT_PX = 40 // px per 30-min slot
 
+export const CATEGORY_LABELS: Record<TaskCategory, string> = {
+  bed1: "1-bed viewing",
+  bed2: "2-beds viewing",
+  contract: "Contract signing",
+  other: "Other",
+}
+
 export const CATEGORY_COLORS: Record<TaskCategory, { bg: string; border: string; dot: string }> = {
   bed1: {
     bg: "rgba(199, 210, 254, 0.55)",
