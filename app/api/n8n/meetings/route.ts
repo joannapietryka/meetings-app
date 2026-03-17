@@ -7,11 +7,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "missing_webhook_url" }, { status: 500 })
     }
 
+    const authHeaderName = process.env.N8N_MEETINGS_AUTH_HEADER_NAME
+    const authHeaderValue = process.env.N8N_MEETINGS_AUTH_HEADER_VALUE
+
     const body = await req.json()
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" }
+    if (authHeaderName && authHeaderValue) {
+      headers[authHeaderName] = authHeaderValue
+    }
 
     const res = await fetch(webhookUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     })
 
