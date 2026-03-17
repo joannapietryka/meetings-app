@@ -266,6 +266,7 @@ export function AdminCalendar() {
         })
     } else {
       const meetingId = id()
+      const createdAt = new Date().toISOString()
       db.transact([
         // use any to avoid over-strict Instant generic typing here
         (db.tx.meetings as any)[meetingId].create({
@@ -276,8 +277,32 @@ export function AdminCalendar() {
           time: payload.time,
           duration: payload.duration,
           userEmail: payload.email,
+          createdAt,
+          lastEditedBy: "admin",
+          updatedAt: createdAt,
         }),
-      ]).catch((err: any) => {
+      ])
+        .then(() => {
+          fetch("/api/n8n/meetings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              event: "meeting.created",
+              meetingId,
+              title: payload.title,
+              description: payload.description,
+              category: payload.category,
+              date: payload.date,
+              time: payload.time,
+              duration: payload.duration,
+              userEmail: payload.email,
+              createdAt,
+              lastEditedBy: "admin",
+              updatedAt: createdAt,
+            }),
+          }).catch(() => {})
+        })
+        .catch((err: any) => {
         console.error("InstantDB error (admin create)", err)
         alert(err?.body?.message ?? err?.message ?? "Could not save the meeting.")
       })

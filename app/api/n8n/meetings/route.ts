@@ -1,0 +1,30 @@
+import { NextResponse } from "next/server"
+
+export async function POST(req: Request) {
+  try {
+    const webhookUrl = process.env.N8N_MEETINGS_WEBHOOK_URL
+    if (!webhookUrl) {
+      return NextResponse.json({ error: "missing_webhook_url" }, { status: 500 })
+    }
+
+    const body = await req.json()
+
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+
+    const text = await res.text()
+    return new NextResponse(text, {
+      status: res.status,
+      headers: { "Content-Type": res.headers.get("content-type") ?? "text/plain" },
+    })
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: "proxy_error", message: err?.message ?? "Unknown error" },
+      { status: 500 }
+    )
+  }
+}
+

@@ -208,15 +208,30 @@ export function GuestDashboard() {
                 return
               }
               const meetingId = id()
+              const createdAt = new Date().toISOString()
               db.transact([
                 (db.tx.meetings as any)[meetingId].create({
                   ...payload,
-                  createdAt: new Date().toISOString(),
+                  createdAt,
                   userId: user?.id,
                   userEmail: user?.email,
                 }),
               ])
                 .then(() => {
+                  // Fire-and-forget n8n trigger (server proxy avoids CORS)
+                  fetch("/api/n8n/meetings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      event: "meeting.created",
+                      meetingId,
+                      ...payload,
+                      createdAt,
+                      userId: user?.id,
+                      userEmail: user?.email,
+                    }),
+                  }).catch(() => {})
+
                   setShowForm(false)
                   setLastCreated({
                     id: meetingId,
