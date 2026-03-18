@@ -490,7 +490,7 @@ export function AddTaskModal({
               border: "1px solid rgba(12,17,91,0.6)",
             }}
           >
-            {isSubmitting ? "Adding..." : "Add Meeting"}
+            {isSubmitting ? (isEditing ? "Saving..." : "Adding...") : isEditing ? "Save changes" : "Add Meeting"}
           </button>
         </form>
       </div>

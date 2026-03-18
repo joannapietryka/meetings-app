@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { GripVertical, X, Clock } from "lucide-react"
 import type { Task } from "@/lib/calendar-types"
 import { CATEGORY_COLORS } from "@/lib/calendar-types"
@@ -15,12 +16,20 @@ interface TaskCardProps {
 
 export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
   const colors = CATEGORY_COLORS[task.category]
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
     <div
       draggable={!isLocked}
       onDragStart={isLocked ? undefined : (e) => onDragStart(e, task.id)}
-      onClick={onClickTask ? () => onClickTask(task) : undefined}
+      onClick={
+        onClickTask
+          ? () => {
+              if (confirmingDelete) return
+              onClickTask(task)
+            }
+          : undefined
+      }
       className={`group relative rounded-lg px-2 py-1.5 select-none transition-all duration-200 w-full overflow-hidden ${
         isLocked ? "cursor-default opacity-70" : "cursor-grab active:cursor-grabbing hover:brightness-110"
       }`}
@@ -40,12 +49,62 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
       {/* Delete button (hidden for locked meetings) */}
       {!isLocked && (
         <button
-          onClick={() => onDelete(task.id)}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setConfirmingDelete(true)
+          }}
           className="absolute right-1 top-1 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity rounded-full p-0.5 hover:bg-black/10"
           aria-label="Delete meeting"
         >
           <X className="w-2.5 h-2.5 text-slate-600" />
         </button>
+      )}
+
+      {!isLocked && confirmingDelete && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center px-2"
+          style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          role="dialog"
+          aria-label="Confirm delete meeting"
+        >
+          <div className="w-full">
+            <p className="text-[11px] text-slate-700 font-sans font-semibold text-center">
+              Are you sure you want to delete this meeting?
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                style={{ background: "rgba(12,17,91,0.12)", border: "1px solid rgba(12,17,91,0.35)", color: "#0C115B" }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setConfirmingDelete(false)
+                }}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", color: "#b91c1c" }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setConfirmingDelete(false)
+                  onDelete(task.id)
+                }}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="pl-3 pr-3">

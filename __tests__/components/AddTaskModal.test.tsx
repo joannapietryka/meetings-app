@@ -94,7 +94,7 @@ describe("AddTaskModal", () => {
         existingTasks,
         initialTitle: "My Meeting",
       })
-      const submit = screen.getByRole("button", { name: /add meeting/i })
+      const submit = screen.getByRole("button", { name: /save changes/i })
       expect(submit).not.toBeDisabled()
     })
   })
