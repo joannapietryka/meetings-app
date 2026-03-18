@@ -209,6 +209,31 @@ export function AdminCalendar() {
   }
 
   const handleDelete = (meetingId: string) => {
+    const meeting = meetings.find((m) => m.id === meetingId)
+    const deletedAt = new Date().toISOString()
+    const guestEmail = meeting?.userEmail
+
+    // Trigger n8n so it can email the guest (admins deleting)
+    if (guestEmail && meeting) {
+      fetch("/api/n8n/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "meeting.deleted",
+          deletedBy: "admin",
+          meetingId,
+          title: meeting.title,
+          description: meeting.description,
+          category: meeting.category,
+          date: meeting.date,
+          time: meeting.time,
+          duration: meeting.duration,
+          userEmail: guestEmail,
+          deletedAt,
+        }),
+      }).catch(() => {})
+    }
+
     db.transact(db.tx.meetings[meetingId].delete()).catch((err: any) => {
       console.error("InstantDB error (admin delete)", err)
       alert(err?.body?.message ?? err?.message ?? "Could not delete the meeting.")

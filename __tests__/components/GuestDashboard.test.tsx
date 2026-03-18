@@ -107,4 +107,42 @@ describe("GuestDashboard", () => {
       expect(screen.getByText(/network error/i)).toBeInTheDocument()
     })
   })
+
+  it("fires n8n meeting.deleted with deletedBy=user when guest deletes a meeting", async () => {
+    ;(global as any).fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        text: async () => "",
+      } as any)
+    )
+    const fetchSpy = global.fetch as jest.Mock
+
+    ;(global as any).confirm = jest.fn(() => true)
+
+    mockMeetings([
+      {
+        id: "m1",
+        userId: mockUser.id,
+        title: "My Meeting",
+        category: "bed1",
+        date: "2026-03-17",
+        time: "10:00",
+        duration: 30,
+        // userEmail is not part of the mockMeetings type, but GuestDashboard uses it defensively
+      } as any,
+    ])
+
+    // Render and click delete on the meeting card
+    render(<GuestDashboard />)
+    const deleteButton = screen.getByRole("button", { name: /delete/i })
+    await userEvent.click(deleteButton)
+
+    expect(fetchSpy).toHaveBeenCalled()
+    const [, init] = fetchSpy.mock.calls[0]
+    expect(init?.method).toBe("POST")
+    const body = JSON.parse((init as any).body)
+    expect(body.event).toBe("meeting.deleted")
+    expect(body.deletedBy).toBe("user")
+    expect(body.meetingId).toBe("m1")
+  })
 })

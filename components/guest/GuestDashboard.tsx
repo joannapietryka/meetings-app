@@ -113,6 +113,31 @@ export function GuestDashboard() {
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
                   onClick={() => {
                     if (!confirm("Delete this meeting?")) return
+
+                    const deletedAt = new Date().toISOString()
+                    const guestEmail = m.userEmail ?? user?.email
+
+                    // Trigger n8n so it can email admins +/or the guest
+                    if (guestEmail) {
+                      fetch("/api/n8n/meetings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          event: "meeting.deleted",
+                          deletedBy: "user",
+                          meetingId: m.id,
+                          title: m.title,
+                          description: m.description,
+                          category: m.category,
+                          date: m.date,
+                          time: m.time,
+                          duration: m.duration,
+                          userEmail: guestEmail,
+                          deletedAt,
+                        }),
+                      }).catch(() => {})
+                    }
+
                     db.transact(db.tx.meetings[m.id].delete()).catch((err: any) => {
                       console.error("InstantDB error (guest delete)", err)
                       alert(err?.body?.message ?? err?.message ?? "Could not delete your meeting.")
