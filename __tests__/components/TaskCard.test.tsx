@@ -32,18 +32,28 @@ describe("TaskCard", () => {
 
   it("shows confirmation and deletes only on Yes", async () => {
     const onDelete = jest.fn()
+    const onClickTask = jest.fn()
     render(
       <TaskCard
         task={task}
         onDragStart={jest.fn()}
         onDelete={onDelete}
-        onClickTask={jest.fn()}
+        onClickTask={onClickTask}
       />
     )
 
     await userEvent.click(screen.getByRole("button", { name: /delete meeting/i }))
-    expect(screen.getByRole("dialog", { name: /confirm delete meeting/i })).toBeInTheDocument()
+    expect(screen.getByText(/are you sure you want to delete this meeting/i)).toBeInTheDocument()
 
+    // Outside click closes tooltip without deleting or opening edit
+    await userEvent.click(document.body)
+    expect(screen.queryByText(/are you sure you want to delete this meeting/i)).not.toBeInTheDocument()
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(onClickTask).not.toHaveBeenCalled()
+
+    // Re-open tooltip and cancel via "No"
+    await userEvent.click(screen.getByRole("button", { name: /delete meeting/i }))
+    expect(screen.getByText(/are you sure you want to delete this meeting/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /^no$/i }))
     expect(onDelete).not.toHaveBeenCalled()
 

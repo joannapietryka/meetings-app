@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { GripVertical, X, Clock } from "lucide-react"
 import type { Task } from "@/lib/calendar-types"
 import { CATEGORY_COLORS } from "@/lib/calendar-types"
@@ -17,6 +18,55 @@ interface TaskCardProps {
 export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
   const colors = CATEGORY_COLORS[task.category]
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null)
+  const tooltipRef = useRef<HTMLDivElement | null>(null)
+  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number } | null>(null)
+  const [hasWindow, setHasWindow] = useState(false)
+
+  useEffect(() => {
+    setHasWindow(true)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!confirmingDelete) return
+    if (!deleteButtonRef.current) return
+
+    const update = () => {
+      const rect = deleteButtonRef.current!.getBoundingClientRect()
+      // Place tooltip slightly left of the X, aligned to top.
+      const top = Math.max(8, rect.top - 2)
+      const left = Math.max(8, rect.left - 200) // ~tooltip width
+      setTooltipPos({ top, left })
+    }
+
+    update()
+    window.addEventListener("scroll", update, true)
+    window.addEventListener("resize", update)
+    return () => {
+      window.removeEventListener("scroll", update, true)
+      window.removeEventListener("resize", update)
+    }
+  }, [confirmingDelete])
+
+  useEffect(() => {
+    if (!confirmingDelete) return
+
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+
+      // If click is inside tooltip or delete button, ignore.
+      if (tooltipRef.current?.contains(target)) return
+      if (deleteButtonRef.current?.contains(target)) return
+
+      setConfirmingDelete(false)
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, true)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true)
+    }
+  }, [confirmingDelete])
 
   return (
     <div
@@ -49,6 +99,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
       {/* Delete button (hidden for locked meetings) */}
       {!isLocked && (
         <button
+          ref={deleteButtonRef}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -62,49 +113,63 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
       )}
 
       {!isLocked && confirmingDelete && (
-        <div
-          className="absolute inset-0 z-20 flex items-center justify-center px-2"
-          style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)" }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          role="dialog"
-          aria-label="Confirm delete meeting"
-        >
-          <div className="w-full">
-            <p className="text-[11px] text-slate-700 font-sans font-semibold text-center">
-              Are you sure you want to delete this meeting?
-            </p>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
-                style={{ background: "rgba(12,17,91,0.12)", border: "1px solid rgba(12,17,91,0.35)", color: "#0C115B" }}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setConfirmingDelete(false)
-                }}
-              >
-                No
-              </button>
-              <button
-                type="button"
-                className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
-                style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", color: "#b91c1c" }}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setConfirmingDelete(false)
-                  onDelete(task.id)
-                }}
-              >
-                Yes
-              </button>
+        hasWindow &&
+        tooltipPos &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className="fixed z-[9999]"
+            style={{ top: tooltipPos.top, left: tooltipPos.left }}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            role="tooltip"
+            aria-label="Delete confirmation"
+          >
+            <div
+              className="rounded-lg px-2 py-2 shadow-lg"
+              style={{
+                background: "rgba(255,255,255,0.95)",
+                border: "1px solid rgba(0,0,0,0.12)",
+                backdropFilter: "blur(12px)",
+                minWidth: 190,
+              }}
+            >
+              <p className="text-[11px] text-slate-700 font-sans font-semibold leading-snug">
+                Are you sure you want to delete this meeting?
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                  style={{ background: "rgba(12,17,91,0.12)", border: "1px solid rgba(12,17,91,0.35)", color: "#0C115B" }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setConfirmingDelete(false)
+                  }}
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                  style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", color: "#b91c1c" }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setConfirmingDelete(false)
+                    onDelete(task.id)
+                  }}
+                >
+                  Yes
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
+          </div>,
+          document.body
+        )
       )}
 
       <div className="pl-3 pr-3">
