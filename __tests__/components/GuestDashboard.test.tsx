@@ -117,8 +117,6 @@ describe("GuestDashboard", () => {
     )
     const fetchSpy = global.fetch as jest.Mock
 
-    ;(global as any).confirm = jest.fn(() => true)
-
     mockMeetings([
       {
         id: "m1",
@@ -136,6 +134,9 @@ describe("GuestDashboard", () => {
     render(<GuestDashboard />)
     const deleteButton = screen.getByRole("button", { name: /delete/i })
     await userEvent.click(deleteButton)
+
+    const yesButton = await screen.findByRole("button", { name: /yes/i })
+    await userEvent.click(yesButton)
 
     expect(fetchSpy).toHaveBeenCalled()
     const [, init] = fetchSpy.mock.calls[0]

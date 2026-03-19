@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
 import type { TaskCategory } from "@/lib/calendar-types"
@@ -42,6 +43,89 @@ export function GuestDashboard() {
   const [showThanks, setShowThanks] = useState(false)
   const [lastCreated, setLastCreated] = useState<Meeting | null>(null)
   const [editing, setEditing] = useState<Meeting | null>(null)
+
+  const [hasWindow, setHasWindow] = useState(false)
+  const [deletingMeeting, setDeletingMeeting] = useState<Meeting | null>(null)
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null)
+  const deleteTooltipRef = useRef<HTMLDivElement | null>(null)
+  const [deleteTooltipPos, setDeleteTooltipPos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    setHasWindow(true)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!deletingMeeting) return
+    if (!deleteButtonRef.current) return
+
+    const update = () => {
+      const rect = deleteButtonRef.current!.getBoundingClientRect()
+      const top = Math.max(8, rect.top - 2)
+      const left = Math.max(8, rect.left - 200)
+      setDeleteTooltipPos({ top, left })
+    }
+
+    update()
+    window.addEventListener("scroll", update, true)
+    window.addEventListener("resize", update)
+    return () => {
+      window.removeEventListener("scroll", update, true)
+      window.removeEventListener("resize", update)
+    }
+  }, [deletingMeeting])
+
+  useEffect(() => {
+    if (!deletingMeeting) return
+
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+
+      // Ignore clicks inside tooltip or the delete button itself.
+      if (deleteTooltipRef.current?.contains(target)) return
+      if (deleteButtonRef.current?.contains(target)) return
+
+      setDeletingMeeting(null)
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, true)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true)
+    }
+  }, [deletingMeeting])
+
+  const handleConfirmDelete = (meeting: Meeting) => {
+    setDeletingMeeting(null)
+
+    const deletedAt = new Date().toISOString()
+    const guestEmail = meeting.userEmail ?? user?.email
+
+    // Trigger n8n so it can email admins +/or the guest.
+    if (guestEmail) {
+      fetch("/api/n8n/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "meeting.deleted",
+          deletedBy: "user",
+          meetingId: meeting.id,
+          title: meeting.title,
+          description: meeting.description,
+          category: meeting.category,
+          date: meeting.date,
+          time: meeting.time,
+          duration: meeting.duration,
+          userEmail: guestEmail,
+          deletedAt,
+        }),
+      }).catch(() => {})
+    }
+
+    db.transact(db.tx.meetings[meeting.id].delete()).catch((err: any) => {
+      console.error("InstantDB error (guest delete)", err)
+      alert(err?.body?.message ?? err?.message ?? "Could not delete your meeting.")
+    })
+  }
 
   if (isLoading) return null
   if (error) {
@@ -111,37 +195,10 @@ export function GuestDashboard() {
                 <button
                   type="button"
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
-                  onClick={() => {
-                    if (!confirm("Delete this meeting?")) return
-
-                    const deletedAt = new Date().toISOString()
-                    const guestEmail = m.userEmail ?? user?.email
-
-                    // Trigger n8n so it can email admins +/or the guest
-                    if (guestEmail) {
-                      fetch("/api/n8n/meetings", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          event: "meeting.deleted",
-                          deletedBy: "user",
-                          meetingId: m.id,
-                          title: m.title,
-                          description: m.description,
-                          category: m.category,
-                          date: m.date,
-                          time: m.time,
-                          duration: m.duration,
-                          userEmail: guestEmail,
-                          deletedAt,
-                        }),
-                      }).catch(() => {})
-                    }
-
-                    db.transact(db.tx.meetings[m.id].delete()).catch((err: any) => {
-                      console.error("InstantDB error (guest delete)", err)
-                      alert(err?.body?.message ?? err?.message ?? "Could not delete your meeting.")
-                    })
+                  onClick={(e) => {
+                    e.preventDefault()
+                    deleteButtonRef.current = e.currentTarget
+                    setDeletingMeeting(m)
                   }}
                 >
                   Delete
@@ -195,12 +252,15 @@ export function GuestDashboard() {
       {/* Add / edit meeting modal */}
       {showForm && (
         <AddTaskModal
-          defaultDate={editing?.date ?? new Date().toISOString().slice(0, 10)}
+          defaultDate={
+            editing?.date ?? new Date().toLocaleDateString("sv-SE")
+          }
           defaultTime={editing?.time}
-          existingTasks={myMeetings as any}
+          existingTasks={allMeetings as any}
           initialTitle={editing?.title}
           initialDescription={editing?.description}
           initialCategory={editing?.category}
+          editingTaskId={editing?.id}
           onClose={() => setShowForm(false)}
           onAdd={(payload: {
             title: string
@@ -273,6 +333,72 @@ export function GuestDashboard() {
             }
           }}
         />
+      )}
+
+      {/* Delete confirmation (custom, like calendar view) */}
+      {hasWindow && deletingMeeting && deleteTooltipPos && (
+        createPortal(
+          <div
+            ref={deleteTooltipRef}
+            className="fixed z-[9999]"
+            style={{ top: deleteTooltipPos.top, left: deleteTooltipPos.left }}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            role="tooltip"
+            aria-label="Delete confirmation"
+          >
+            <div
+              className="rounded-lg px-2 py-2 shadow-lg"
+              style={{
+                background: "rgba(255,255,255,0.95)",
+                border: "1px solid rgba(0,0,0,0.12)",
+                backdropFilter: "blur(12px)",
+                minWidth: 190,
+              }}
+            >
+              <p className="text-[11px] text-slate-700 font-sans font-semibold leading-snug">
+                Are you sure you want to delete this meeting?
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                  style={{
+                    background: "rgba(12,17,91,0.12)",
+                    border: "1px solid rgba(12,17,91,0.35)",
+                    color: "#0C115B",
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setDeletingMeeting(null)
+                  }}
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 rounded-md py-1 text-[11px] font-semibold font-sans"
+                  style={{
+                    background: "rgba(239,68,68,0.12)",
+                    border: "1px solid rgba(239,68,68,0.35)",
+                    color: "#b91c1c",
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    handleConfirmDelete(deletingMeeting!)
+                  }}
+                >
+                  Yes
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
       )}
 
       {/* Thank-you popup */}

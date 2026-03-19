@@ -11,8 +11,32 @@ import type { Task } from "@/lib/calendar-types"
 
 type AddTaskModalProps = React.ComponentProps<typeof AddTaskModal>
 
+function formatLocalYYYYMMDD(d: Date) {
+  // sv-SE gives YYYY-MM-DD
+  return d.toLocaleDateString("sv-SE")
+}
+
+function addDays(d: Date, days: number) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + days)
+  return x
+}
+
+function isWeekend(d: Date) {
+  const day = d.getDay()
+  return day === 0 || day === 6
+}
+
+function nextWeekdayStr(from: Date, daysAhead: number) {
+  let d = addDays(from, daysAhead)
+  while (isWeekend(d)) d = addDays(d, 1)
+  return formatLocalYYYYMMDD(d)
+}
+
+const TEST_DATE = nextWeekdayStr(new Date(), 1) // tomorrow weekday
+
 const defaultProps: AddTaskModalProps = {
-  defaultDate: "2026-03-17", // Monday
+  defaultDate: TEST_DATE,
   existingTasks: [] as Task[],
   onClose: jest.fn(),
   onAdd: jest.fn(),
@@ -63,13 +87,13 @@ describe("AddTaskModal", () => {
           id: "1",
           title: "My Meeting",
           category: "bed1",
-          date: "2026-03-17",
+          date: TEST_DATE,
           time: "10:00",
           duration: 60,
         },
       ]
       renderModal({
-        defaultDate: "2026-03-17",
+        defaultDate: TEST_DATE,
         existingTasks,
         initialTitle: "My Meeting",
         initialDescription: "",
@@ -84,13 +108,13 @@ describe("AddTaskModal", () => {
           id: "1",
           title: "My Meeting",
           category: "bed1",
-          date: "2026-03-17",
+          date: TEST_DATE,
           time: "10:00",
           duration: 60,
         },
       ]
       renderModal({
-        defaultDate: "2026-03-17",
+        defaultDate: TEST_DATE,
         existingTasks,
         initialTitle: "My Meeting",
       })
@@ -106,12 +130,14 @@ describe("AddTaskModal", () => {
           id: "1",
           title: "Booked",
           category: "bed1",
-          date: "2026-03-17",
+          date: TEST_DATE,
           time: "10:00",
           duration: 60,
         },
       ]
-      renderModal({ defaultDate: "2026-03-17", existingTasks })
+      // Provide defaultTime to prevent the component's "prefill first available date+time"
+      // effect from changing the selected date during this test.
+      renderModal({ defaultDate: TEST_DATE, defaultTime: "10:00", existingTasks })
       const comboboxes = screen.getAllByRole("combobox")
       const timeSelect = comboboxes[1] as HTMLSelectElement
       const options = within(timeSelect).getAllByRole("option")

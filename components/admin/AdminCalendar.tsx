@@ -524,6 +524,7 @@ export function AdminCalendar() {
           initialTitle={editing?.title}
           initialDescription={editing?.description}
           initialCategory={editing?.category}
+          editingTaskId={editing?.id}
           initialEmail={editing?.userEmail}
           showEmailField
           onClose={() => {
