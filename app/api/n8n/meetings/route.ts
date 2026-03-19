@@ -10,7 +10,14 @@ export async function POST(req: Request) {
     const authHeaderName = process.env.N8N_MEETINGS_AUTH_HEADER_NAME
     const authHeaderValue = process.env.N8N_MEETINGS_AUTH_HEADER_VALUE
 
-    const body = await req.json()
+    const body = (await req.json()) as Record<string, unknown>
+
+    const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+    const adminEmailsStr = adminEmails.join(",")
+    const payload = { ...body, adminEmails: adminEmailsStr }
 
     const headers: Record<string, string> = { "Content-Type": "application/json" }
     if (authHeaderName && authHeaderValue) {
@@ -20,7 +27,7 @@ export async function POST(req: Request) {
     const res = await fetch(webhookUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     })
 
     const text = await res.text()
