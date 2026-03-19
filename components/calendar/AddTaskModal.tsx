@@ -49,7 +49,6 @@ function generateTimeSlots(): string[] {
     slots.push(`${String(h).padStart(2, "0")}:00`)
     slots.push(`${String(h).padStart(2, "0")}:30`)
   }
-  slots.push(`${String(CALENDAR_END_HOUR).padStart(2, "0")}:00`)
   return slots
 }
 
@@ -430,7 +429,8 @@ export function AddTaskModal({
               {ALL_TIME_SLOTS.map(slot => {
                 const isOutsideWindow = !isSlotWithinBookingWindow(selectedDate, slot)
                 const isConflicting = isSlotConflictingWithDuration(slot, duration, blockedSlots)
-                const isDisabled = isOutsideWindow || isConflicting
+                const doesNotFitDuration = !fitsInDay(slot, duration)
+                const isDisabled = isOutsideWindow || isConflicting || doesNotFitDuration
                 const isBlocked = blockedSlots.has(slot)
                 return (
                   <option 
@@ -443,7 +443,15 @@ export function AddTaskModal({
                     }}
                   >
                     {slot}
-                    {isBlocked ? " (booked)" : isOutsideWindow ? " (unavailable)" : isConflicting ? " (unavailable)" : ""}
+                    {isBlocked
+                      ? " (booked)"
+                      : isOutsideWindow
+                        ? " (unavailable)"
+                        : isConflicting
+                          ? " (unavailable)"
+                          : doesNotFitDuration
+                            ? " (unavailable)"
+                            : ""}
                   </option>
                 )
               })}
