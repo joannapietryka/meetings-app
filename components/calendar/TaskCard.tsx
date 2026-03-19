@@ -17,6 +17,17 @@ interface TaskCardProps {
 
 export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
   const colors = CATEGORY_COLORS[task.category]
+  const status = (task as any).status as string | undefined
+  const taskDateTime = (() => {
+    try {
+      const [y, mo, d] = task.date.split("-").map(Number)
+      const [h, m] = (task.time ?? "00:00").split(":").map(Number)
+      return new Date(y, mo - 1, d, h, m).getTime()
+    } catch {
+      return null
+    }
+  })()
+  const isUpcoming = taskDateTime !== null ? taskDateTime >= Date.now() : false
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const deleteButtonRef = useRef<HTMLButtonElement | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
@@ -91,6 +102,13 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
         height: height ? `${height}px` : undefined,
       }}
     >
+      {status === "not_confirmed" && isUpcoming && (
+        <div className="absolute right-2 bottom-0.5 flex items-center gap-1 pointer-events-none">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "rgba(239, 68, 68, 1)" }} />
+          <span className="text-[9px] font-bold text-red-600 font-sans leading-none">NC</span>
+        </div>
+      )}
+
       {/* Drag handle */}
       <div className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-50 transition-opacity">
         <GripVertical className="w-3 h-3 text-slate-600" />

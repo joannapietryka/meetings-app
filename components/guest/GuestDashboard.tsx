@@ -19,6 +19,11 @@ type Meeting = {
   createdAt?: string
   userId?: string
   userEmail?: string
+  status?: "confirmed" | "not_confirmed" | string
+  previousDate?: string
+  previousTime?: string
+  previousDuration?: number
+  changeRequestedAt?: string
 }
 
 function toDateTime(m: Meeting): number {
@@ -272,12 +277,41 @@ export function GuestDashboard() {
           }) => {
             if (editing) {
               // Update existing meeting
+              const nowIso = new Date().toISOString()
               db.transact(
                 db.tx.meetings[editing.id].update({
                   ...payload,
+                  // User-confirmed edits should not keep the "waiting for confirmation" state.
+                  // Admin will only need confirmation when *admin* requests a change.
+                  status: "confirmed",
+                  previousDate: null,
+                  previousTime: null,
+                  previousDuration: null,
+                  changeRequestedAt: null,
+                  lastEditedBy: "guest",
+                  updatedAt: nowIso,
                 })
               )
                 .then(() => {
+                  // Fire-and-forget n8n trigger (server proxy avoids CORS)
+                  fetch("/api/n8n/meetings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      event: "meeting.edited",
+                      editedBy: "user",
+                      meetingId: editing.id,
+                      ...payload,
+                      userEmail: editing.userEmail ?? user?.email,
+                      status: "confirmed",
+                      previousDate: null,
+                      previousTime: null,
+                      previousDuration: null,
+                      changeRequestedAt: null,
+                      updatedAt: nowIso,
+                    }),
+                  }).catch(() => {})
+
                   setShowForm(false)
                   setEditing(null)
                 })

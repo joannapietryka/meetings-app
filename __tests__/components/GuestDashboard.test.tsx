@@ -4,12 +4,33 @@
  */
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { GuestDashboard } from "@/components/guest/GuestDashboard"
 import { db } from "@/lib/db"
 
 const mockUser = { id: "guest-user-1", email: "guest@test.com" }
+
+jest.mock("@/components/calendar/AddTaskModal", () => {
+  const React = require("react")
+  return {
+    AddTaskModal: (props: any) => {
+      // Simulate the user saving the meeting immediately.
+      React.useEffect(() => {
+        props.onAdd({
+          title: "Updated meeting",
+          description: "Updated description",
+          category: props.initialCategory ?? "bed1",
+          date: props.defaultDate ?? "2026-03-18",
+          time: "10:00",
+          duration: 30,
+        })
+      }, [])
+
+      return null
+    },
+  }
+})
 
 function mockMeetings(meetings: Array<{ id: string; userId?: string; title: string; category: string; date: string; time?: string; duration?: number }>) {
   ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
@@ -144,6 +165,43 @@ describe("GuestDashboard", () => {
     const body = JSON.parse((init as any).body)
     expect(body.event).toBe("meeting.deleted")
     expect(body.deletedBy).toBe("user")
+    expect(body.meetingId).toBe("m1")
+  })
+
+  it("fires n8n meeting.edited with editedBy=user when guest edits a meeting", async () => {
+    ;(global as any).fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        text: async () => "",
+      } as any)
+    )
+    const fetchSpy = global.fetch as jest.Mock
+
+    mockMeetings([
+      {
+        id: "m1",
+        userId: mockUser.id,
+        title: "My Meeting",
+        category: "bed1",
+        date: "2026-03-17",
+        time: "10:00",
+        duration: 30,
+      } as any,
+    ])
+
+    render(<GuestDashboard />)
+
+    const editButton = screen.getByRole("button", { name: /edit/i })
+    await userEvent.click(editButton)
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled()
+    })
+
+    const [, init] = fetchSpy.mock.calls[0]
+    const body = JSON.parse((init as any).body)
+    expect(body.event).toBe("meeting.edited")
+    expect(body.editedBy).toBe("user")
     expect(body.meetingId).toBe("m1")
   })
 })

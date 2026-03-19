@@ -26,9 +26,9 @@ type Meeting = {
   date: string
   time?: string
   duration?: number
-  createdAt?: string
   userId?: string
   userEmail?: string
+  createdAt?: string
   status?: "confirmed" | "not_confirmed" | string
   updatedAt?: string
   lastEditedBy?: "admin" | "guest" | string
@@ -188,22 +188,58 @@ export function AdminCalendar() {
     }
 
     const nowIso = new Date().toISOString()
+    const isUserMeeting = Boolean(moving.userId) || moving.lastEditedBy !== "admin"
+
     db.transact(
       db.tx.meetings[draggingId.current].update({
-        previousDate: moving.date,
-        previousTime: moving.time,
-        previousDuration: moving.duration,
+        previousDate: isUserMeeting ? moving.date : null,
+        previousTime: isUserMeeting ? moving.time : null,
+        previousDuration: isUserMeeting ? moving.duration : null,
         date: targetDate,
         time: newTime,
-        status: "not_confirmed",
-        changeRequestedAt: nowIso,
-        lastEditedBy: "admin",
+        ...(isUserMeeting
+          ? {
+              status: "not_confirmed",
+              changeRequestedAt: nowIso,
+            }
+          : {
+              status: null,
+              changeRequestedAt: null,
+            }),
+        lastEditedBy: isUserMeeting ? "guest" : "admin",
         updatedAt: nowIso,
       })
-    ).catch((err: any) => {
-      console.error("InstantDB error (admin drag)", err)
-      alert(err?.body?.message ?? err?.message ?? "Could not move the meeting.")
-    })
+    )
+      .then(() => {
+        // Fire-and-forget n8n trigger for edited meetings.
+        // n8n can use `status === "not_confirmed"` and/or `editedBy` to decide whether to email.
+        fetch("/api/n8n/meetings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "meeting.edited",
+            editedBy: "admin",
+            meetingId: moving.id,
+            title: moving.title,
+            description: moving.description,
+            category: moving.category,
+            userEmail: moving.userEmail,
+            date: targetDate,
+            time: newTime,
+            duration: moving.duration,
+            previousDate: isUserMeeting ? moving.date : null,
+            previousTime: isUserMeeting ? moving.time : null,
+            previousDuration: isUserMeeting ? moving.duration : null,
+            status: isUserMeeting ? "not_confirmed" : null,
+            changeRequestedAt: isUserMeeting ? nowIso : null,
+            updatedAt: nowIso,
+          }),
+        }).catch(() => {})
+      })
+      .catch((err: any) => {
+        console.error("InstantDB error (admin drag)", err)
+        alert(err?.body?.message ?? err?.message ?? "Could not move the meeting.")
+      })
 
     draggingId.current = null
   }
@@ -254,6 +290,7 @@ export function AdminCalendar() {
       const dateTimeChanged = editing.date !== payload.date || (editing.time ?? "") !== (payload.time ?? "")
       const durationChanged = (editing.duration ?? null) !== (payload.duration ?? null)
       const needsConfirmation = dateTimeChanged || durationChanged
+      const isUserMeeting = Boolean(editing.userId) || editing.lastEditedBy !== "admin"
 
       db.transact([
         (db.tx.meetings as any)[editing.id].update({
@@ -262,14 +299,15 @@ export function AdminCalendar() {
           category: payload.category,
           ...(needsConfirmation
             ? {
-                previousDate: editing.date,
-                previousTime: editing.time,
-                previousDuration: editing.duration,
+                previousDate: isUserMeeting ? editing.date : null,
+                previousTime: isUserMeeting ? editing.time : null,
+                previousDuration: isUserMeeting ? editing.duration : null,
                 date: payload.date,
                 time: payload.time,
                 duration: payload.duration,
-                status: "not_confirmed",
-                changeRequestedAt: nowIso,
+                ...(isUserMeeting
+                  ? { status: "not_confirmed", changeRequestedAt: nowIso }
+                  : { status: null, changeRequestedAt: null }),
               }
             : {
                 date: payload.date,
@@ -277,11 +315,39 @@ export function AdminCalendar() {
                 duration: payload.duration,
               }),
           userEmail: payload.email,
-          lastEditedBy: "admin",
+          lastEditedBy: isUserMeeting ? "guest" : "admin",
           updatedAt: nowIso,
         }),
       ])
         .then(() => {
+          // Fire-and-forget n8n trigger for edited meetings.
+          fetch("/api/n8n/meetings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              event: "meeting.edited",
+              editedBy: "admin",
+              meetingId: editing.id,
+              title: payload.title,
+              description: payload.description,
+              category: payload.category,
+              userEmail: payload.email,
+              date: payload.date,
+              time: payload.time,
+              duration: payload.duration,
+              ...(needsConfirmation && isUserMeeting
+                ? {
+                    previousDate: editing.date,
+                    previousTime: editing.time,
+                    previousDuration: editing.duration,
+                    status: "not_confirmed",
+                    changeRequestedAt: nowIso,
+                  }
+                : {}),
+              updatedAt: nowIso,
+            }),
+          }).catch(() => {})
+
           setModalConfig(null)
           setEditing(null)
         })
@@ -446,6 +512,15 @@ export function AdminCalendar() {
               </div>
             )
           })}
+          <div className="flex items-center gap-1.5">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{
+                backgroundColor: "rgba(239, 68, 68, 1)",
+              }}
+            />
+            <span className="text-slate-600 text-[11px] font-sans">NC (needs confirmation)</span>
+          </div>
           <span className="ml-auto flex items-center gap-2 text-slate-400 text-[11px] font-sans">
             <span>Drag meetings between days · Click a slot to add</span>
             <span className="flex items-center gap-1">
