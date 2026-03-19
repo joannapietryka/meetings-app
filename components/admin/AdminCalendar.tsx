@@ -28,6 +28,7 @@ type Meeting = {
   duration?: number
   userId?: string
   userEmail?: string
+  createdBy?: "admin" | "guest" | string
   createdAt?: string
   status?: "confirmed" | "not_confirmed" | string
   updatedAt?: string
@@ -56,6 +57,19 @@ function generateTimeSlots(): string[] {
   }
   slots.push(`${String(CALENDAR_END_HOUR).padStart(2, "0")}:00`)
   return slots
+}
+
+function isUserOwnedMeeting(m: Meeting): boolean {
+  // Primary signal for new data.
+  if (m.createdBy === "guest") return true
+  if (m.createdBy === "admin") return false
+
+  // Backward-compatible fallback for older records that do not have createdBy.
+  if (Boolean(m.userId)) return true
+  if (m.lastEditedBy === "guest") return true
+  // Legacy data fallback: if ownership is unknown, prefer confirmation flow
+  // so admin edits don't silently skip guest confirmation.
+  return true
 }
 
 export function AdminCalendar() {
@@ -188,7 +202,7 @@ export function AdminCalendar() {
     }
 
     const nowIso = new Date().toISOString()
-    const isUserMeeting = Boolean(moving.userId) || moving.lastEditedBy !== "admin"
+    const isUserMeeting = isUserOwnedMeeting(moving)
 
     db.transact(
       db.tx.meetings[draggingId.current].update({
@@ -206,7 +220,7 @@ export function AdminCalendar() {
               status: null,
               changeRequestedAt: null,
             }),
-        lastEditedBy: isUserMeeting ? "guest" : "admin",
+        lastEditedBy: "admin",
         updatedAt: nowIso,
       })
     )
@@ -290,7 +304,7 @@ export function AdminCalendar() {
       const dateTimeChanged = editing.date !== payload.date || (editing.time ?? "") !== (payload.time ?? "")
       const durationChanged = (editing.duration ?? null) !== (payload.duration ?? null)
       const needsConfirmation = dateTimeChanged || durationChanged
-      const isUserMeeting = Boolean(editing.userId) || editing.lastEditedBy !== "admin"
+      const isUserMeeting = isUserOwnedMeeting(editing)
 
       db.transact([
         (db.tx.meetings as any)[editing.id].update({
@@ -310,12 +324,19 @@ export function AdminCalendar() {
                   : { status: null, changeRequestedAt: null }),
               }
             : {
+                // Admin edited a meeting but date/time/duration did not change.
+                // Clear any previous confirmation state so NC label is removed.
                 date: payload.date,
                 time: payload.time,
                 duration: payload.duration,
+                previousDate: null,
+                previousTime: null,
+                previousDuration: null,
+                status: isUserMeeting ? "confirmed" : null,
+                changeRequestedAt: null,
               }),
           userEmail: payload.email,
-          lastEditedBy: isUserMeeting ? "guest" : "admin",
+          lastEditedBy: "admin",
           updatedAt: nowIso,
         }),
       ])
@@ -335,6 +356,7 @@ export function AdminCalendar() {
               date: payload.date,
               time: payload.time,
               duration: payload.duration,
+              status: needsConfirmation && isUserMeeting ? "not_confirmed" : isUserMeeting ? "confirmed" : null,
               ...(needsConfirmation && isUserMeeting
                 ? {
                     previousDate: editing.date,
@@ -368,6 +390,7 @@ export function AdminCalendar() {
           time: payload.time,
           duration: payload.duration,
           userEmail: payload.email,
+          createdBy: "admin",
           createdAt,
           lastEditedBy: "admin",
           updatedAt: createdAt,

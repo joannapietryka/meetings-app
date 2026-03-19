@@ -19,6 +19,7 @@ type Meeting = {
   createdAt?: string
   userId?: string
   userEmail?: string
+  createdBy?: "admin" | "guest" | string
   status?: "confirmed" | "not_confirmed" | string
   previousDate?: string
   previousTime?: string
@@ -334,6 +335,9 @@ export function GuestDashboard() {
                   createdAt,
                   userId: user?.id,
                   userEmail: user?.email,
+                  createdBy: "guest",
+                  lastEditedBy: "guest",
+                  status: "confirmed",
                 }),
               ])
                 .then(() => {

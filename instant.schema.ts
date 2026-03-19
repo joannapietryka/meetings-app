@@ -13,6 +13,7 @@ export default i.schema({
       createdAt: i.string().optional(),
       userId: i.string().optional(),
       userEmail: i.string().optional(),
+      createdBy: i.string().optional(), // 'admin' | 'guest'
       status: i.string().optional(), // 'confirmed' | 'not_confirmed'
       updatedAt: i.string().optional(),
       lastEditedBy: i.string().optional(), // 'admin' | 'guest'

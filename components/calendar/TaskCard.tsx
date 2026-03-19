@@ -18,16 +18,18 @@ interface TaskCardProps {
 export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
   const colors = CATEGORY_COLORS[task.category]
   const status = (task as any).status as string | undefined
-  const taskDateTime = (() => {
+  const isPastDay = (() => {
     try {
       const [y, mo, d] = task.date.split("-").map(Number)
-      const [h, m] = (task.time ?? "00:00").split(":").map(Number)
-      return new Date(y, mo - 1, d, h, m).getTime()
+      const taskDay = new Date(y, mo - 1, d)
+      taskDay.setHours(0, 0, 0, 0)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      return taskDay.getTime() < today.getTime()
     } catch {
-      return null
+      return false
     }
   })()
-  const isUpcoming = taskDateTime !== null ? taskDateTime >= Date.now() : false
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const deleteButtonRef = useRef<HTMLButtonElement | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
@@ -102,7 +104,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
         height: height ? `${height}px` : undefined,
       }}
     >
-      {status === "not_confirmed" && isUpcoming && (
+      {status === "not_confirmed" && !isPastDay && (
         <div className="absolute right-2 bottom-0.5 flex items-center gap-1 pointer-events-none">
           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "rgba(239, 68, 68, 1)" }} />
           <span className="text-[9px] font-bold text-red-600 font-sans leading-none">NC</span>
