@@ -8,6 +8,7 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 import type { Task } from "@/lib/calendar-types"
+import { DAY_SLOTS } from "@/lib/calendar-types"
 
 type AddTaskModalProps = React.ComponentProps<typeof AddTaskModal>
 
@@ -52,14 +53,14 @@ describe("AddTaskModal", () => {
   })
 
   describe("title and mode", () => {
-    it("shows 'New Meeting' when creating (no initialTitle)", () => {
+    it("shows 'New Session' when creating (no initialTitle)", () => {
       renderModal()
-      expect(screen.getByRole("heading", { name: /new meeting/i })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /new session/i })).toBeInTheDocument()
     })
 
-    it("shows 'Edit Meeting' when initialTitle is provided", () => {
+    it("shows 'Edit Session' when initialTitle is provided", () => {
       renderModal({ initialTitle: "Existing Meeting" })
-      expect(screen.getByRole("heading", { name: /edit meeting/i })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /edit session/i })).toBeInTheDocument()
     })
   })
 
@@ -67,29 +68,31 @@ describe("AddTaskModal", () => {
     it("does not call onAdd when name is empty and form is submitted", async () => {
       const onAdd = jest.fn()
       renderModal({ onAdd })
-      const submit = screen.getByRole("button", { name: /add meeting/i })
+      const submit = screen.getByRole("button", { name: /book session/i })
       await userEvent.click(submit)
       expect(onAdd).not.toHaveBeenCalled()
     })
 
     it("shows inline error when name is empty and form is submitted", async () => {
       renderModal()
-      const submit = screen.getByRole("button", { name: /add meeting/i })
+      const submit = screen.getByRole("button", { name: /book session/i })
       await userEvent.click(submit)
-      expect(screen.getByText(/please enter the guest name/i)).toBeInTheDocument()
+      expect(screen.getByText(/please enter the client name/i)).toBeInTheDocument()
     })
   })
 
   describe("conflict and edit mode", () => {
     it("does not show conflict warning when editing (initialTitle set)", () => {
+      const dayOfWeek = new Date(TEST_DATE).getDay()
+      const firstSlot = (DAY_SLOTS[dayOfWeek] ?? [])[0] ?? "09:00"
       const existingTasks: Task[] = [
         {
           id: "1",
           title: "My Meeting",
-          category: "bed1",
+          category: "individual",
           date: TEST_DATE,
-          time: "10:00",
-          duration: 60,
+          time: firstSlot,
+          duration: 50,
         },
       ]
       renderModal({
@@ -97,20 +100,22 @@ describe("AddTaskModal", () => {
         existingTasks,
         initialTitle: "My Meeting",
         initialDescription: "",
-        initialCategory: "bed1",
+        initialCategory: "individual",
       })
-      expect(screen.queryByText(/this time slot conflicts/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/this time slot is already booked/i)).not.toBeInTheDocument()
     })
 
     it("submit is not disabled by conflict when editing", () => {
+      const dayOfWeek = new Date(TEST_DATE).getDay()
+      const firstSlot = (DAY_SLOTS[dayOfWeek] ?? [])[0] ?? "09:00"
       const existingTasks: Task[] = [
         {
           id: "1",
           title: "My Meeting",
-          category: "bed1",
+          category: "individual",
           date: TEST_DATE,
-          time: "10:00",
-          duration: 60,
+          time: firstSlot,
+          duration: 50,
         },
       ]
       renderModal({
@@ -124,27 +129,28 @@ describe("AddTaskModal", () => {
   })
 
   describe("time options", () => {
-    it("marks slots overlapping existing meeting as booked in time dropdown", () => {
+    it("marks an already-booked slot as disabled in the time dropdown", () => {
+      const dayOfWeek = new Date(TEST_DATE).getDay()
+      const daySlots = DAY_SLOTS[dayOfWeek] ?? []
+      if (daySlots.length === 0) return // skip if this weekday has no slots
+
+      const bookedSlot = daySlots[0]
       const existingTasks: Task[] = [
         {
           id: "1",
           title: "Booked",
-          category: "bed1",
+          category: "individual",
           date: TEST_DATE,
-          time: "10:00",
-          duration: 60,
+          time: bookedSlot,
+          duration: 50,
         },
       ]
-      // Provide defaultTime to prevent the component's "prefill first available date+time"
-      // effect from changing the selected date during this test.
-      renderModal({ defaultDate: TEST_DATE, defaultTime: "10:00", existingTasks })
+      renderModal({ defaultDate: TEST_DATE, defaultTime: bookedSlot, existingTasks })
       const comboboxes = screen.getAllByRole("combobox")
       const timeSelect = comboboxes[1] as HTMLSelectElement
       const options = within(timeSelect).getAllByRole("option")
-      const tenOClock = options.find((o) => (o as HTMLOptionElement).value === "10:00")
-      const tenThirty = options.find((o) => (o as HTMLOptionElement).value === "10:30")
-      expect(tenOClock).toBeDisabled()
-      expect(tenThirty).toBeDisabled()
+      const bookedOption = options.find((o) => (o as HTMLOptionElement).value === bookedSlot)
+      expect(bookedOption).toBeDisabled()
     })
   })
 

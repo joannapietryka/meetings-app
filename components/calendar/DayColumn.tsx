@@ -5,9 +5,10 @@ import { format, isToday } from "date-fns"
 import type { Task } from "@/lib/calendar-types"
 import {
   CALENDAR_START_HOUR,
-  SLOT_MINUTES,
-  TOTAL_SLOTS,
-  SLOT_HEIGHT_PX,
+  CALENDAR_END_HOUR,
+  PX_PER_MINUTE,
+  GRID_TOTAL_HEIGHT,
+  SESSION_DURATION,
 } from "@/lib/calendar-types"
 import { TaskCard } from "./TaskCard"
 
@@ -17,6 +18,12 @@ interface DayColumnProps {
   tasks: Task[]
   isWeekend: boolean
   isLocked: boolean
+  /** Day is administratively blocked — guests can't book, admin sees a badge. */
+  isBlocked?: boolean
+  /** Individual slot times that are blocked on this specific date. */
+  blockedTimes?: Set<string>
+  /** Configured slot times for this specific day (passed from AdminCalendar). */
+  scheduledSlots?: string[]
   canBookSlot?: (time: string) => boolean
   onDragStart: (e: React.DragEvent, taskId: string) => void
   onDrop: (e: React.DragEvent, dateStr: string, gridTop: number) => void
@@ -26,23 +33,17 @@ interface DayColumnProps {
   onClickTask?: (task: Task) => void
 }
 
-function slotToTime(slot: number): string {
-  const totalMinutes = CALENDAR_START_HOUR * 60 + slot * SLOT_MINUTES
-  const h = Math.floor(totalMinutes / 60)
-  const m = totalMinutes % 60
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-}
-
-function timeToTopPx(time: string): number {
+/** Convert "HH:MM" to pixel offset from the top of the grid. */
+function timeToPx(time: string): number {
   const [h, m] = time.split(":").map(Number)
-  const minutesFromStart = (h - CALENDAR_START_HOUR) * 60 + m
-  const slot = minutesFromStart / SLOT_MINUTES
-  return Math.max(0, slot * SLOT_HEIGHT_PX)
+  return ((h - CALENDAR_START_HOUR) * 60 + m) * PX_PER_MINUTE
 }
 
-function durationToHeightPx(durationMinutes: number): number {
-  return (durationMinutes / SLOT_MINUTES) * SLOT_HEIGHT_PX
-}
+/** Full hour ticks drawn as grid lines (8, 9, 10 … 20). */
+const GRID_HOURS = Array.from(
+  { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
+  (_, i) => CALENDAR_START_HOUR + i,
+)
 
 export function DayColumn({
   date,
@@ -50,6 +51,9 @@ export function DayColumn({
   tasks,
   isWeekend,
   isLocked,
+  isBlocked,
+  blockedTimes,
+  scheduledSlots: scheduledSlotsProp,
   canBookSlot,
   onDragStart,
   onDrop,
@@ -65,7 +69,9 @@ export function DayColumn({
   const dayNum = format(date, "d")
   const today = isToday(date)
 
-  // Weekend: collapsed, no-task mini column
+  const scheduledSlots = scheduledSlotsProp ?? []
+
+  // Weekend: collapsed mini column
   if (isWeekend) {
     return (
       <div
@@ -73,9 +79,7 @@ export function DayColumn({
         style={{ width: "100%" }}
         onDragEnter={(e) => {
           e.preventDefault()
-          if (onWeekendHover) {
-            onWeekendHover()
-          }
+          if (onWeekendHover) onWeekendHover()
         }}
       >
         <div
@@ -94,7 +98,7 @@ export function DayColumn({
           style={{
             background: "rgba(255,255,255,0.06)",
             border: "1px dashed rgba(0,0,0,0.1)",
-            minHeight: TOTAL_SLOTS * SLOT_HEIGHT_PX,
+            minHeight: GRID_TOTAL_HEIGHT,
           }}
         >
           <span
@@ -111,24 +115,32 @@ export function DayColumn({
   const timedTasks = tasks.filter((t) => t.time)
   const untimedTasks = tasks.filter((t) => !t.time)
 
+  // Slots with no existing booking → rendered as "Available" ghost blocks
+  const bookedTimes = new Set(timedTasks.map((t) => t.time))
+  const availableSlots = scheduledSlots.filter((slot) => !bookedTimes.has(slot))
+
   return (
     <div className={`flex flex-col min-w-0 flex-1 ${isLocked ? "opacity-60" : ""}`}>
       {/* Day header */}
       <div
         className="mb-2 py-2 px-3 rounded-xl text-center flex-shrink-0"
         style={{
-          background: today
+          background: isBlocked
+            ? "rgba(254,226,226,0.25)"
+            : today
             ? "rgba(12,17,91,0.55)"
             : isLocked
             ? "rgba(255,255,255,0.16)"
             : "rgba(255,255,255,0.28)",
           backdropFilter: "blur(20px)",
-          border: today
+          border: isBlocked
+            ? "1.5px dashed rgba(239,68,68,0.3)"
+            : today
             ? "1px solid rgba(12,17,91,0.6)"
             : isLocked
             ? "1px solid rgba(255,255,255,0.35)"
             : "1px solid rgba(255,255,255,0.45)",
-          boxShadow: today
+          boxShadow: today && !isBlocked
             ? "0 4px 16px rgba(12,17,91,0.2), inset 0 1px 0 rgba(255,255,255,0.3)"
             : isLocked
             ? "0 2px 8px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.4)"
@@ -137,21 +149,21 @@ export function DayColumn({
       >
         <p
           className={`text-[10px] font-semibold uppercase tracking-widest font-sans ${
-            today ? "text-white/70" : isLocked ? "text-slate-400" : "text-slate-500"
+            isBlocked ? "text-rose-400" : today ? "text-white/70" : isLocked ? "text-slate-400" : "text-slate-500"
           }`}
         >
           {dayName}
         </p>
         <p
           className={`text-lg font-bold font-sans leading-tight ${
-            today ? "text-white" : isLocked ? "text-slate-500" : "text-slate-700"
+            isBlocked ? "text-rose-600" : today ? "text-white" : isLocked ? "text-slate-500" : "text-slate-700"
           }`}
         >
           {dayNum}
         </p>
       </div>
 
-      {/* Timed grid drop zone */}
+      {/* Time-based slot grid */}
       <div
         ref={gridRef}
         onDragOver={
@@ -174,7 +186,7 @@ export function DayColumn({
         }
         className="relative rounded-xl overflow-hidden transition-all duration-200"
         style={{
-          height: TOTAL_SLOTS * SLOT_HEIGHT_PX,
+          height: GRID_TOTAL_HEIGHT,
           background: isDragOver ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.18)",
           border: isDragOver ? "1.5px dashed rgba(12,17,91,0.4)" : "1px solid rgba(255,255,255,0.45)",
           backdropFilter: "blur(12px)",
@@ -183,55 +195,85 @@ export function DayColumn({
             : "inset 0 1px 0 rgba(255,255,255,0.4)",
         }}
       >
-        {/* Hour/half-hour slot lines */}
-        {Array.from({ length: TOTAL_SLOTS }).map((_, slot) => {
-          const isHour = slot % 2 === 0
-          const time = slotToTime(slot)
-          const isBookable = !isLocked && (canBookSlot ? canBookSlot(time) : true)
+        {/* Full-hour grid lines */}
+        {GRID_HOURS.map((hour) => (
+          <div
+            key={hour}
+            className="absolute left-0 right-0 pointer-events-none"
+            style={{
+              top: (hour - CALENDAR_START_HOUR) * 60 * PX_PER_MINUTE,
+              borderTop: hour === CALENDAR_START_HOUR
+                ? "none"
+                : "1px solid rgba(0,0,0,0.07)",
+            }}
+          />
+        ))}
+
+        {/* Available slot ghost blocks */}
+        {availableSlots.map((slotTime) => {
+          const slotBlocked = isBlocked || (blockedTimes?.has(slotTime) ?? false)
+          const isBookable = !isLocked && !slotBlocked && (canBookSlot ? canBookSlot(slotTime) : true)
+          const topPx = timeToPx(slotTime)
+          const slotHeight = SESSION_DURATION * PX_PER_MINUTE - 2
+
           return (
             <div
-              key={slot}
-              className={`absolute left-0 right-0 group/slot ${
-                isBookable ? "cursor-pointer" : "cursor-not-allowed"
-              }`}
-              style={{ top: slot * SLOT_HEIGHT_PX, height: SLOT_HEIGHT_PX }}
-              onClick={
-                isBookable
-                  ? () => {
-                      onAddTask(dateStr, time)
-                    }
-                  : undefined
-              }
+              key={slotTime}
+              className={`absolute left-1 right-1 group/avail ${isBookable ? "cursor-pointer" : ""}`}
+              style={{ top: topPx, height: slotHeight, zIndex: 1 }}
+              onClick={isBookable ? () => onAddTask(dateStr, slotTime) : undefined}
             >
               <div
-                className="absolute left-0 right-0 top-0 pointer-events-none"
+                className="h-full rounded-lg px-2 py-1.5 flex flex-col justify-center transition-colors duration-150 group-hover/avail:bg-white/50"
                 style={{
-                  borderTop: isHour
-                    ? "1px solid rgba(0,0,0,0.1)"
-                    : "1px dashed rgba(0,0,0,0.05)",
+                  border: slotBlocked
+                    ? "1.5px dashed rgba(239,68,68,0.3)"
+                    : isBookable
+                    ? "1.5px dashed rgba(0,0,0,0.14)"
+                    : "1.5px dashed rgba(0,0,0,0.07)",
+                  background: slotBlocked
+                    ? "rgba(254,226,226,0.25)"
+                    : isBookable
+                    ? "rgba(255,255,255,0.28)"
+                    : "rgba(0,0,0,0.02)",
                 }}
-              />
-              {/* Hover hint */}
-              <div className="absolute inset-0 opacity-0 group-hover/slot:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="text-slate-400 text-[9px] font-sans">+ {slotToTime(slot)}</span>
+              >
+                <span
+                  className="text-[10px] font-semibold font-sans leading-tight"
+                  style={{ color: slotBlocked ? "#b91c1c" : undefined }}
+                >
+                  {slotTime}
+                </span>
+                <span
+                  className="text-[9px] font-sans"
+                  style={{ color: slotBlocked ? "#ef4444" : undefined }}
+                >
+                  {slotBlocked ? "niedostępny" : "Available"}
+                </span>
               </div>
+              {isBookable && (
+                <div
+                  className="absolute inset-0 rounded-lg opacity-0 group-hover/avail:opacity-100 transition-opacity pointer-events-none"
+                  style={{ border: "1.5px dashed rgba(12,17,91,0.28)" }}
+                />
+              )}
             </div>
           )
         })}
 
-        {/* Positioned tasks */}
+        {/* Positioned meeting cards */}
         {timedTasks.map((task) => {
-          const top = timeToTopPx(task.time!)
-          const height = Math.max(SLOT_HEIGHT_PX, durationToHeightPx(task.duration ?? 30))
+          const topPx = timeToPx(task.time!)
+          const taskHeight = ((task as any).duration ?? SESSION_DURATION) * PX_PER_MINUTE - 2
           return (
             <div
               key={task.id}
               className="absolute left-1 right-1"
-              style={{ top, height, zIndex: 10 }}
+              style={{ top: topPx, height: taskHeight, zIndex: 10 }}
             >
               <TaskCard
                 task={task}
-                height={height}
+                height={taskHeight}
                 onDragStart={onDragStart}
                 onDelete={onDelete}
                 isLocked={isLocked}

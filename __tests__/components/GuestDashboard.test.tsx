@@ -20,10 +20,10 @@ jest.mock("@/components/calendar/AddTaskModal", () => {
         props.onAdd({
           title: "Updated meeting",
           description: "Updated description",
-          category: props.initialCategory ?? "bed1",
+          category: props.initialCategory ?? "individual",
           date: props.defaultDate ?? "2026-03-18",
-          time: "10:00",
-          duration: 30,
+          time: "09:00",
+          duration: 50,
         })
       }, [])
 
@@ -58,8 +58,8 @@ describe("GuestDashboard", () => {
 
     it("shows Add meeting button enabled when user has 2 meetings", () => {
       mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
+        { id: "1", userId: mockUser.id, title: "One", category: "individual", date: "2026-03-17", time: "09:00", duration: 50 },
+        { id: "2", userId: mockUser.id, title: "Two", category: "couples", date: "2026-03-18", time: "10:15", duration: 50 },
       ])
       render(<GuestDashboard />)
       const addButton = screen.getByRole("button", { name: /add meeting/i })
@@ -68,9 +68,9 @@ describe("GuestDashboard", () => {
 
     it("disables Add meeting button when user has 3 meetings", () => {
       mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
-        { id: "3", userId: mockUser.id, title: "Three", category: "contract", date: "2026-03-19", time: "14:00", duration: 60 },
+        { id: "1", userId: mockUser.id, title: "One", category: "individual", date: "2026-03-17", time: "09:00", duration: 50 },
+        { id: "2", userId: mockUser.id, title: "Two", category: "couples", date: "2026-03-18", time: "10:15", duration: 50 },
+        { id: "3", userId: mockUser.id, title: "Three", category: "initial", date: "2026-03-19", time: "13:30", duration: 50 },
       ])
       render(<GuestDashboard />)
       const addButton = screen.getByRole("button", { name: /add meeting/i })
@@ -79,9 +79,9 @@ describe("GuestDashboard", () => {
 
     it("shows info text that only 3 meetings can be scheduled when at limit", () => {
       mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
-        { id: "3", userId: mockUser.id, title: "Three", category: "contract", date: "2026-03-19", time: "14:00", duration: 60 },
+        { id: "1", userId: mockUser.id, title: "One", category: "individual", date: "2026-03-17", time: "09:00", duration: 50 },
+        { id: "2", userId: mockUser.id, title: "Two", category: "couples", date: "2026-03-18", time: "10:15", duration: 50 },
+        { id: "3", userId: mockUser.id, title: "Three", category: "initial", date: "2026-03-19", time: "13:30", duration: 50 },
       ])
       render(<GuestDashboard />)
       expect(screen.getByText(/you can schedule up to 3 meetings/i)).toBeInTheDocument()
@@ -89,7 +89,7 @@ describe("GuestDashboard", () => {
 
     it("does not show limit message when under 3 meetings", () => {
       mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
+        { id: "1", userId: mockUser.id, title: "One", category: "individual", date: "2026-03-17", time: "09:00", duration: 50 },
       ])
       render(<GuestDashboard />)
       expect(screen.queryByText(/you can schedule up to 3 meetings/i)).not.toBeInTheDocument()
@@ -143,10 +143,10 @@ describe("GuestDashboard", () => {
         id: "m1",
         userId: mockUser.id,
         title: "My Meeting",
-        category: "bed1",
+        category: "individual",
         date: "2026-03-17",
-        time: "10:00",
-        duration: 30,
+        time: "09:00",
+        duration: 50,
         // userEmail is not part of the mockMeetings type, but GuestDashboard uses it defensively
       } as any,
     ])
@@ -182,10 +182,10 @@ describe("GuestDashboard", () => {
         id: "m1",
         userId: mockUser.id,
         title: "My Meeting",
-        category: "bed1",
+        category: "individual",
         date: "2026-03-17",
-        time: "10:00",
-        duration: 30,
+        time: "09:00",
+        duration: 50,
       } as any,
     ])
 

@@ -4,7 +4,13 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { X } from "lucide-react"
 import { format, addDays, startOfDay, isWeekend, isBefore, isAfter, addHours, parseISO } from "date-fns"
 import type { Task, TaskCategory } from "@/lib/calendar-types"
-import { CALENDAR_START_HOUR, CALENDAR_END_HOUR, CATEGORY_COLORS } from "@/lib/calendar-types"
+import {
+  CALENDAR_END_HOUR,
+  SESSION_DURATION,
+  DAY_SLOTS,
+  CATEGORY_COLORS,
+} from "@/lib/calendar-types"
+import { addMonths } from "date-fns"
 
 interface AddTaskModalProps {
   defaultDate: string
@@ -26,68 +32,63 @@ interface AddTaskModalProps {
   editingTaskId?: string
   showEmailField?: boolean
   initialEmail?: string
+  /** Dynamic schedule from DB — falls back to the hardcoded DAY_SLOTS constant when omitted. */
+  daySlots?: Record<number, string[]>
+  /** Dates the current user is not allowed to book (already has a meeting that day, or weekly cap reached). */
+  disabledDates?: Set<string>
+  /** Admin-blocked individual slots: date → set of blocked times. */
+  adminBlockedSlots?: Map<string, Set<string>>
 }
 
 const CATEGORIES: { value: TaskCategory; label: string }[] = [
-  { value: "bed1", label: "1-bed viewing" },
-  { value: "bed2", label: "2-beds viewing" },
-  { value: "contract", label: "Contract signing" },
-  { value: "other", label: "Other" },
+  { value: "w_gabinecie", label: "W gabinecie" },
+  { value: "online",      label: "Online" },
 ]
 
-const DURATIONS = [
-  { label: "30 min", value: 30 },
-  { label: "1 hr", value: 60 },
-  { label: "1.5 hr", value: 90 },
-  { label: "2 hr", value: 120 },
-]
-
-// Generate available time slots: only full hour and :30 minute slots
-function generateTimeSlots(): string[] {
-  const slots: string[] = []
-  for (let h = CALENDAR_START_HOUR; h < CALENDAR_END_HOUR; h++) {
-    slots.push(`${String(h).padStart(2, "0")}:00`)
-    slots.push(`${String(h).padStart(2, "0")}:30`)
-  }
-  return slots
+/** Returns the psychologist slots available for the given date string. */
+function getSlotsForDate(dateStr: string, slots: Record<number, string[]>): string[] {
+  const dayOfWeek = parseISO(dateStr).getDay()
+  return slots[dayOfWeek] ?? []
 }
 
-const ALL_TIME_SLOTS = generateTimeSlots()
-
-function fitsInDay(time: string, durationMinutes: number): boolean {
+/** True if a 50-min session starting at `time` finishes before the calendar end. */
+function fitsInDay(time: string): boolean {
   const [h, m] = time.split(":").map(Number)
-  const startMinutes = h * 60 + m
-  const endMinutes = startMinutes + durationMinutes
-  const dayEndMinutes = CALENDAR_END_HOUR * 60
-  return endMinutes <= dayEndMinutes
+  const endMinutes = h * 60 + m + SESSION_DURATION
+  return endMinutes <= CALENDAR_END_HOUR * 60
 }
 
-// Generate available dates: next 14 days (weekdays only)
-function generateAvailableDates(): { date: Date; dateStr: string; label: string }[] {
+/** Generate available dates: up to maxDate, weekdays only, that have at least one slot. */
+function generateAvailableDates(
+  slots: Record<number, string[]>,
+  maxDate: Date,
+): { date: Date; dateStr: string; label: string }[] {
   const today = startOfDay(new Date())
-  const maxDate = addDays(today, 14)
   const dates: { date: Date; dateStr: string; label: string }[] = []
-  
+
   let current = today
   while (!isAfter(current, maxDate)) {
     if (!isWeekend(current)) {
-      dates.push({
-        date: current,
-        dateStr: format(current, "yyyy-MM-dd"),
-        label: format(current, "EEE, MMM d"),
-      })
+      const dateStr = format(current, "yyyy-MM-dd")
+      if (getSlotsForDate(dateStr, slots).length > 0) {
+        dates.push({
+          date: current,
+          dateStr,
+          label: format(current, "EEE, MMM d"),
+        })
+      }
     }
     current = addDays(current, 1)
   }
-  
+
   return dates
 }
 
-export function AddTaskModal({ 
-  defaultDate, 
-  defaultTime, 
+export function AddTaskModal({
+  defaultDate,
+  defaultTime,
   existingTasks,
-  onClose, 
+  onClose,
   onAdd,
   initialTitle,
   initialDescription,
@@ -95,41 +96,38 @@ export function AddTaskModal({
   editingTaskId,
   showEmailField,
   initialEmail,
+  daySlots,
+  disabledDates,
+  adminBlockedSlots,
 }: AddTaskModalProps) {
+  const slots = daySlots ?? DAY_SLOTS
   const isEditing = !!initialTitle
-  const availableDates = useMemo(() => generateAvailableDates(), [])
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(now), [now])
-  const maxBookingDate = useMemo(() => addDays(today, 14), [today])
+  const maxBookingDate = useMemo(() => addMonths(today, 1), [today])
+  const availableDates = useMemo(
+    () => generateAvailableDates(slots, maxBookingDate).filter(
+      (d) => !disabledDates?.has(d.dateStr)
+    ),
+    [slots, maxBookingDate, disabledDates],
+  )
 
   const isSlotWithinBookingWindow = (dateStr: string, slot: string) => {
     const [h, m] = slot.split(":").map(Number)
     const date = parseISO(dateStr)
     const slotDateTime = new Date(date)
     slotDateTime.setHours(h, m, 0, 0)
-
     const minBookingDateTime = addHours(now, 2)
-
     if (isBefore(slotDateTime, minBookingDateTime)) return false
     if (isAfter(startOfDay(date), maxBookingDate)) return false
     return true
   }
 
-  const isSlotConflictingWithDuration = (startSlot: string, durationMinutes: number, blocked: Set<string>) => {
-    const [h, m] = startSlot.split(":").map(Number)
-    const startMinutes = h * 60 + m
-
-    for (let offset = 0; offset < durationMinutes; offset += 30) {
-      const checkMinutes = startMinutes + offset
-      const checkH = Math.floor(checkMinutes / 60)
-      const checkM = checkMinutes % 60
-      const checkSlot = `${String(checkH).padStart(2, "0")}:${String(checkM).padStart(2, "0")}`
-      if (blocked.has(checkSlot)) return true
-    }
-
-    return false
+  // Two 50-min sessions conflict if their start times are identical (slots are spaced >50 min apart)
+  const isSlotConflicting = (startSlot: string, blocked: Set<string>) => {
+    return blocked.has(startSlot)
   }
-  
+
   // Ensure default date is valid (weekday within range)
   const validDefaultDate = useMemo(() => {
     const found = availableDates.find(d => d.dateStr === defaultDate)
@@ -138,64 +136,45 @@ export function AddTaskModal({
 
   const [title, setTitle] = useState(initialTitle ?? "")
   const [description, setDescription] = useState(initialDescription ?? "")
-  const [category, setCategory] = useState<TaskCategory>(initialCategory ?? "bed1")
+  const [category, setCategory] = useState<TaskCategory>(initialCategory ?? "w_gabinecie")
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
-  const [time, setTime] = useState(defaultTime && ALL_TIME_SLOTS.includes(defaultTime) ? defaultTime : "09:00")
-  const [duration, setDuration] = useState(30)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
   const [email, setEmail] = useState(initialEmail ?? "")
   const [emailError, setEmailError] = useState<string | null>(null)
 
-  const isValidEmail = (value: string) => {
-    // Simple RFC5322-ish email check: something@something.something
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  }
+  // Initialise time: prefer defaultTime if it's a valid slot for the date, else pick first slot
+  const [time, setTime] = useState(() => {
+    const dayTimeSlots = getSlotsForDate(defaultDate, slots)
+    if (defaultTime && dayTimeSlots.includes(defaultTime)) return defaultTime
+    return dayTimeSlots[0] ?? ""
+  })
 
+  const isValidEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+
+  // blocked start times per date (exact meeting start times of other sessions)
   const blockedSlotsByDate = useMemo(() => {
     const map = new Map<string, Set<string>>()
-
     for (const { dateStr } of availableDates) {
       const blocked = new Set<string>()
-      const dayTasks = existingTasks
+      existingTasks
         .filter((t) => t.date === dateStr)
         .filter((t) => {
-          if (!isEditing) return true
-          if (!editingTaskId) return true
+          if (!isEditing || !editingTaskId) return true
           return t.id !== editingTaskId
         })
-
-      dayTasks.forEach((task) => {
-        if (!task.time) return
-        const [h, m] = task.time.split(":").map(Number)
-        const startMinutes = h * 60 + m
-        const taskDuration = task.duration || 30
-
-        // Mark all slots that overlap with this task (each slot is 30 minutes).
-        ALL_TIME_SLOTS.forEach((slot) => {
-          const [slotH, slotM] = slot.split(":").map(Number)
-          const slotStartMinutes = slotH * 60 + slotM
-          const slotEndMinutes = slotStartMinutes + 30
-
-          if (
-            (slotStartMinutes >= startMinutes && slotStartMinutes < startMinutes + taskDuration) ||
-            (slotEndMinutes > startMinutes && slotEndMinutes <= startMinutes + taskDuration) ||
-            (slotStartMinutes <= startMinutes && slotEndMinutes >= startMinutes + taskDuration)
-          ) {
-            blocked.add(slot)
-          }
+        .forEach((task) => {
+          if (task.time) blocked.add(task.time)
         })
-      })
-
       map.set(dateStr, blocked)
     }
-
     return map
-  }, [availableDates, existingTasks])
+  }, [availableDates, existingTasks, isEditing, editingTaskId])
 
   const blockedSlots = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
 
-  // For new meetings without an explicit defaultTime, prefill with the first available date+time.
+  // Auto-prefill the first valid date+time when opening a new booking
   const didInitialPrefill = useRef(false)
   useEffect(() => {
     if (isEditing) return
@@ -203,82 +182,76 @@ export function AddTaskModal({
     if (didInitialPrefill.current) return
 
     for (const { dateStr } of availableDates) {
+      const dayTimeSlots = getSlotsForDate(dateStr, slots)
       const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
-      for (const slot of ALL_TIME_SLOTS) {
+      for (const slot of dayTimeSlots) {
         if (!isSlotWithinBookingWindow(dateStr, slot)) continue
-        if (!fitsInDay(slot, duration)) continue
-        if (isSlotConflictingWithDuration(slot, duration, blocked)) continue
-
+        if (!fitsInDay(slot)) continue
+        if (isSlotConflicting(slot, blocked)) continue
         setSelectedDate(dateStr)
         setTime(slot)
         didInitialPrefill.current = true
         return
       }
     }
-
     didInitialPrefill.current = true
-  }, [isEditing, defaultTime, availableDates, blockedSlotsByDate, duration, now, maxBookingDate])
+  }, [isEditing, defaultTime, availableDates, blockedSlotsByDate, now, maxBookingDate])
 
-  // If user changes duration and the current selection becomes invalid, auto-pick the first valid time for the selected date.
+  // When date changes, validate current time is still a valid slot for the new day
   useEffect(() => {
     if (isEditing) return
-    if (!selectedDate) return
-    if (!time) return
+    if (!selectedDate || !time) return
 
+    const dayTimeSlots = getSlotsForDate(selectedDate, slots)
     const blocked = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
     const selectionInvalid =
+      !dayTimeSlots.includes(time) ||
       !isSlotWithinBookingWindow(selectedDate, time) ||
-      !fitsInDay(time, duration) ||
-      isSlotConflictingWithDuration(time, duration, blocked)
+      isSlotConflicting(time, blocked)
 
     if (!selectionInvalid) return
 
-    for (const slot of ALL_TIME_SLOTS) {
+    for (const slot of dayTimeSlots) {
       if (!isSlotWithinBookingWindow(selectedDate, slot)) continue
-      if (!fitsInDay(slot, duration)) continue
-      if (isSlotConflictingWithDuration(slot, duration, blocked)) continue
+      if (isSlotConflicting(slot, blocked)) continue
       setTime(slot)
       return
     }
-  }, [duration, selectedDate, time, isEditing, blockedSlotsByDate, now, maxBookingDate])
+  }, [selectedDate, isEditing, blockedSlotsByDate, now, maxBookingDate])
 
-  // Check if the selected time + duration would conflict
   const wouldConflict = useMemo(() => {
     if (!time) return false
-    return isSlotConflictingWithDuration(time, duration, blockedSlots)
-  }, [time, duration, blockedSlots])
+    return isSlotConflicting(time, blockedSlots)
+  }, [time, blockedSlots])
 
   const dateEnabledMap = useMemo(() => {
     const map = new Map<string, boolean>()
     for (const { dateStr } of availableDates) {
       const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
-      let enabled = false
-
-      for (const slot of ALL_TIME_SLOTS) {
-        if (!isSlotWithinBookingWindow(dateStr, slot)) continue
-        if (!fitsInDay(slot, duration)) continue
-        if (isSlotConflictingWithDuration(slot, duration, blocked)) continue
-        enabled = true
-        break
-      }
-
+      const dayTimeSlots = getSlotsForDate(dateStr, slots)
+      const enabled = dayTimeSlots.some(
+        (slot) =>
+          isSlotWithinBookingWindow(dateStr, slot) &&
+          fitsInDay(slot) &&
+          !isSlotConflicting(slot, blocked)
+      )
       map.set(dateStr, enabled)
     }
     return map
-  }, [availableDates, blockedSlotsByDate, duration, now, maxBookingDate])
+  }, [availableDates, blockedSlotsByDate, now, maxBookingDate])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
     if (!title.trim()) {
-      setNameError("Please enter the guest name.")
+      setNameError("Please enter the client name.")
       return
     }
 
     if (showEmailField) {
       const trimmed = email.trim()
       if (!trimmed) {
-        setEmailError("Please enter the guest email.")
+        setEmailError("Please enter the client email.")
         return
       }
       if (!isValidEmail(trimmed)) {
@@ -287,15 +260,13 @@ export function AddTaskModal({
       }
     }
 
-    // Ensure the chosen duration fits before end of day (17:00)
-    if (!fitsInDay(time, duration)) {
-      alert("This meeting would end after 17:00. Please choose an earlier time or shorter duration.")
+    if (!fitsInDay(time)) {
+      alert(`This session would end after ${CALENDAR_END_HOUR}:00. Please choose an earlier time.`)
       return
     }
 
-    if (!initialTitle && wouldConflict) {
-      // Only enforce conflict rule when creating a new meeting.
-      alert("This time slot is already booked. Please choose a different time or duration.")
+    if (!isEditing && wouldConflict) {
+      alert("This time slot is already booked. Please choose a different time.")
       return
     }
     setIsSubmitting(true)
@@ -307,7 +278,7 @@ export function AddTaskModal({
       category,
       date: selectedDate,
       time: time || undefined,
-      duration,
+      duration: SESSION_DURATION,
       email: showEmailField ? email.trim() : undefined,
     })
     onClose()
@@ -338,7 +309,7 @@ export function AddTaskModal({
       >
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-slate-800 text-lg font-bold font-sans">
-            {isEditing ? "Edit Meeting" : "New Meeting"}
+            {isEditing ? "Edit Session" : "New Session"}
           </h2>
           <button
             onClick={onClose}
@@ -353,7 +324,7 @@ export function AddTaskModal({
           {/* Name */}
           <div>
             <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Name
+              Client name
             </label>
             <input
               autoFocus
@@ -384,7 +355,7 @@ export function AddTaskModal({
                   setEmail(e.target.value)
                   if (emailError) setEmailError(null)
                 }}
-                placeholder="guest@example.com"
+                placeholder="client@example.com"
                 className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
                 style={inputStyle}
               />
@@ -415,10 +386,10 @@ export function AddTaskModal({
             </select>
           </div>
 
-          {/* Time selector */}
+          {/* Time selector — shows only the psychologist slots for the selected day */}
           <div>
             <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Time
+              Time <span className="normal-case font-normal text-slate-400">(50-min session)</span>
             </label>
             <select
               value={time}
@@ -426,95 +397,51 @@ export function AddTaskModal({
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans cursor-pointer"
               style={{ ...inputStyle, WebkitAppearance: "none" }}
             >
-              {ALL_TIME_SLOTS.map(slot => {
+              {getSlotsForDate(selectedDate, slots).map(slot => {
                 const isOutsideWindow = !isSlotWithinBookingWindow(selectedDate, slot)
-                const isConflicting = isSlotConflictingWithDuration(slot, duration, blockedSlots)
-                const doesNotFitDuration = !fitsInDay(slot, duration)
-                const isDisabled = isOutsideWindow || isConflicting || doesNotFitDuration
-                const isBlocked = blockedSlots.has(slot)
+                const isConflicting = isSlotConflicting(slot, blockedSlots)
+                const isAdminBlocked = adminBlockedSlots?.get(selectedDate)?.has(slot) ?? false
+                const isDisabled = isOutsideWindow || isConflicting || isAdminBlocked
                 return (
-                  <option 
-                    key={slot} 
+                  <option
+                    key={slot}
                     value={slot}
                     disabled={isDisabled}
-                    style={{ 
-                      background: isDisabled ? "#fef2f2" : "#fff", 
-                      color: isDisabled ? "#ef4444" : "#1e293b" 
+                    style={{
+                      background: isDisabled ? "#fef2f2" : "#fff",
+                      color: isDisabled ? "#ef4444" : "#1e293b",
                     }}
                   >
                     {slot}
-                    {isBlocked
+                    {isConflicting
                       ? " (booked)"
                       : isOutsideWindow
                         ? " (unavailable)"
-                        : isConflicting
-                          ? " (unavailable)"
-                          : doesNotFitDuration
-                            ? " (unavailable)"
-                            : ""}
+                        : ""}
                   </option>
                 )
               })}
             </select>
           </div>
 
-          {/* Duration */}
-          <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Duration
-            </label>
-            <div className="flex gap-2">
-              {DURATIONS.map((d) => (
-                <button
-                  key={d.value}
-                  type="button"
-                  onClick={() => {
-                    if (!fitsInDay(time, d.value)) return
-                    setDuration(d.value)
-                  }}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-semibold font-sans transition-all duration-150"
-                  style={{
-                    background: !fitsInDay(time, d.value)
-                      ? "rgba(0,0,0,0.02)"
-                      : duration === d.value
-                      ? "rgba(12,17,91,0.12)"
-                      : "rgba(0,0,0,0.05)",
-                    border: !fitsInDay(time, d.value)
-                      ? "1px solid rgba(0,0,0,0.05)"
-                      : duration === d.value
-                      ? "1px solid rgba(12,17,91,0.4)"
-                      : "1px solid rgba(0,0,0,0.1)",
-                    color: !fitsInDay(time, d.value)
-                      ? "#cbd5f5"
-                      : duration === d.value
-                      ? "#0C115B"
-                      : "#64748b",
-                  }}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Conflict warning (only when creating a new meeting) */}
+          {/* Conflict warning (only when creating a new session) */}
           {!isEditing && wouldConflict && (
-            <div 
+            <div
               className="px-3 py-2 rounded-lg text-xs font-sans"
               style={{
                 background: "rgba(239, 68, 68, 0.1)",
                 border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#991b1b"
+                color: "#991b1b",
               }}
             >
-              This time slot conflicts with an existing meeting. Choose a different time or duration.
+              This time slot is already booked. Choose a different time.
             </div>
           )}
 
-          {/* Category */}
+          {/* Session type */}
           <div>
             <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Category
+              Session type
             </label>
             <div className="flex gap-2 flex-wrap">
               {CATEGORIES.map((cat) => {
@@ -532,8 +459,8 @@ export function AddTaskModal({
                       color: isSelected ? colors.dot : "#64748b",
                     }}
                   >
-                    <span 
-                      className="w-2 h-2 rounded-full" 
+                    <span
+                      className="w-2 h-2 rounded-full"
                       style={{ backgroundColor: colors.dot }}
                     />
                     {cat.label}
@@ -570,7 +497,9 @@ export function AddTaskModal({
               border: "1px solid rgba(12,17,91,0.6)",
             }}
           >
-            {isSubmitting ? (isEditing ? "Saving..." : "Adding...") : isEditing ? "Save changes" : "Add Meeting"}
+            {isSubmitting
+              ? (isEditing ? "Saving..." : "Booking...")
+              : isEditing ? "Save changes" : "Book session"}
           </button>
         </form>
       </div>

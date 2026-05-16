@@ -2,11 +2,21 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { addDays, addMonths, format, isAfter, parseISO, startOfDay } from "date-fns"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
 import type { TaskCategory } from "@/lib/calendar-types"
 import { CATEGORY_LABELS } from "@/lib/calendar-types"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
+
+/** Returns "YYYY-MM-DD" of the Monday of the week containing dateStr. */
+function getWeekKey(dateStr: string): string {
+  const date = parseISO(dateStr)
+  const dow = date.getDay() // 0=Sun
+  const diffToMonday = dow === 0 ? -6 : 1 - dow
+  const monday = addDays(date, diffToMonday)
+  return format(monday, "yyyy-MM-dd")
+}
 
 type Meeting = {
   id: string
@@ -38,7 +48,23 @@ export function GuestDashboard() {
   const { isLoading, error, data } = db.useQuery({ meetings: {} })
   const allMeetings = (data?.meetings ?? []) as Meeting[]
   const myMeetings = allMeetings.filter((m) => m.userId === user?.id)
-  const hasReachedLimit = myMeetings.length >= 3
+
+  const { data: blockedData } = db.useQuery({ blockedDates: {} })
+  const blockedDateSet = useMemo(
+    () => new Set(((blockedData?.blockedDates ?? []) as unknown as { date: string }[]).map((b) => b.date)),
+    [blockedData],
+  )
+
+  const { data: blockedSlotsData } = db.useQuery({ blockedSlots: {} })
+  const adminBlockedSlots = useMemo<Map<string, Set<string>>>(() => {
+    const records = (blockedSlotsData?.blockedSlots ?? []) as unknown as { date: string; time: string }[]
+    const map = new Map<string, Set<string>>()
+    for (const r of records) {
+      if (!map.has(r.date)) map.set(r.date, new Set())
+      map.get(r.date)!.add(r.time)
+    }
+    return map
+  }, [blockedSlotsData])
 
   const sortedMeetings = useMemo(
     () => [...myMeetings].sort((a, b) => toDateTime(a) - toDateTime(b)),
@@ -49,6 +75,44 @@ export function GuestDashboard() {
   const [showThanks, setShowThanks] = useState(false)
   const [lastCreated, setLastCreated] = useState<Meeting | null>(null)
   const [editing, setEditing] = useState<Meeting | null>(null)
+
+  // Meetings excluding the one being edited (so editing doesn't count against its own limits)
+  const relevantMeetings = useMemo(
+    () => myMeetings.filter((m) => m.id !== editing?.id),
+    [myMeetings, editing],
+  )
+
+  // Dates the user can't book: already has a meeting that day (max 1/day)
+  // or the week already has 2 meetings (max 2/week)
+  const disabledDates = useMemo(() => {
+    const disabled = new Set<string>()
+    const meetingsPerWeek = new Map<string, number>()
+
+    for (const m of relevantMeetings) {
+      disabled.add(m.date)
+      const wk = getWeekKey(m.date)
+      meetingsPerWeek.set(wk, (meetingsPerWeek.get(wk) ?? 0) + 1)
+    }
+
+    // For full weeks (2 meetings), block ALL weekdays in that week
+    const maxDate = addMonths(startOfDay(new Date()), 1)
+    for (const [weekKey, count] of meetingsPerWeek) {
+      if (count >= 2) {
+        const monday = parseISO(weekKey)
+        for (let i = 0; i < 5; i++) {
+          const d = addDays(monday, i)
+          if (!isAfter(d, maxDate)) disabled.add(format(d, "yyyy-MM-dd"))
+        }
+      }
+    }
+
+    // Admin-blocked dates (holidays, vacation, etc.)
+    for (const date of blockedDateSet) {
+      disabled.add(date)
+    }
+
+    return disabled
+  }, [relevantMeetings, blockedDateSet])
 
   const [hasWindow, setHasWindow] = useState(false)
   const [deletingMeeting, setDeletingMeeting] = useState<Meeting | null>(null)
@@ -140,13 +204,22 @@ export function GuestDashboard() {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
-      style={{
-        backgroundImage: "url('/images/bg-green-gradient.jpg')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}
+      className="relative min-h-screen flex flex-col before:content-[''] 
+
+  before:absolute 
+
+  before:inset-0 
+
+  before:bg-[url('/images/rose-bg.jpg')] 
+
+  before:bg-cover 
+
+  before:bg-center 
+
+  before:opacity-50 
+
+  before:z-[-1]"
+     
     >
       {/* Top bar */}
       <header className="px-4 py-3">
@@ -218,20 +291,13 @@ export function GuestDashboard() {
             <button
               type="button"
               onClick={() => {
-                if (hasReachedLimit) return
                 setEditing(null)
                 setShowForm(true)
               }}
-              disabled={hasReachedLimit}
-              className="rounded-xl border border-dashed border-slate-300 text-slate-600 text-sm font-sans flex items-center justify-center py-6 bg-white/40 hover:bg-white/70 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-xl border border-dashed border-slate-300 text-slate-600 text-sm font-sans flex items-center justify-center py-6 bg-white/40 hover:bg-white/70 transition"
             >
-              + Add meeting
+              + Dodaj wizytę
             </button>
-            {hasReachedLimit && (
-              <p className="text-[11px] text-slate-700 font-sans">
-                You can schedule up to 3 meetings.
-              </p>
-            )}
           </div>
         </div>
       </main>
@@ -267,6 +333,8 @@ export function GuestDashboard() {
           initialDescription={editing?.description}
           initialCategory={editing?.category}
           editingTaskId={editing?.id}
+          disabledDates={disabledDates}
+          adminBlockedSlots={adminBlockedSlots}
           onClose={() => setShowForm(false)}
           onAdd={(payload: {
             title: string
@@ -277,7 +345,21 @@ export function GuestDashboard() {
             duration?: number
           }) => {
             if (editing) {
-              // Update existing meeting
+              // Update existing meeting — validate limits if date changed
+              if (payload.date !== editing.date) {
+                const dayCount = relevantMeetings.filter((m) => m.date === payload.date).length
+                if (dayCount >= 1) {
+                  alert("Masz już wizytę zaplanowaną na ten dzień.")
+                  return
+                }
+                const weekCount = relevantMeetings.filter(
+                  (m) => getWeekKey(m.date) === getWeekKey(payload.date)
+                ).length
+                if (weekCount >= 2) {
+                  alert("Możesz zarezerwować maksymalnie 2 wizyty w tygodniu.")
+                  return
+                }
+              }
               const nowIso = new Date().toISOString()
               db.transact(
                 db.tx.meetings[editing.id].update({
@@ -321,10 +403,17 @@ export function GuestDashboard() {
                   alert(err?.body?.message ?? err?.message ?? "Could not update your meeting.")
                 })
             } else {
-              // Create new meeting
-              if (myMeetings.length >= 3) {
-                alert("You can only schedule up to 3 meetings.")
-                setShowForm(false)
+              // Create new meeting — enforce per-day and per-week limits
+              const dayCount = relevantMeetings.filter((m) => m.date === payload.date).length
+              if (dayCount >= 1) {
+                alert("Masz już wizytę zaplanowaną na ten dzień.")
+                return
+              }
+              const weekCount = relevantMeetings.filter(
+                (m) => getWeekKey(m.date) === getWeekKey(payload.date)
+              ).length
+              if (weekCount >= 2) {
+                alert("Możesz zarezerwować maksymalnie 2 wizyty w tygodniu.")
                 return
               }
               const meetingId = id()
