@@ -13,8 +13,10 @@ import { DAY_SLOTS } from "@/lib/calendar-types"
 type AddTaskModalProps = React.ComponentProps<typeof AddTaskModal>
 
 function formatLocalYYYYMMDD(d: Date) {
-  // sv-SE gives YYYY-MM-DD
-  return d.toLocaleDateString("sv-SE")
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function addDays(d: Date, days: number) {
@@ -53,14 +55,23 @@ describe("AddTaskModal", () => {
   })
 
   describe("title and mode", () => {
-    it("shows 'New Session' when creating (no initialTitle)", () => {
+    it("shows new-booking heading when creating (no editingTaskId)", () => {
       renderModal()
-      expect(screen.getByRole("heading", { name: /new session/i })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /nowa wizyta/i })).toBeInTheDocument()
     })
 
-    it("shows 'Edit Session' when initialTitle is provided", () => {
-      renderModal({ initialTitle: "Existing Meeting" })
-      expect(screen.getByRole("heading", { name: /edit session/i })).toBeInTheDocument()
+    it("shows edit heading when editingTaskId is set", () => {
+      renderModal({
+        editingTaskId: "meeting-1",
+        initialTitle: "Existing Meeting",
+      })
+      expect(screen.getByRole("heading", { name: /edytuj wizytę/i })).toBeInTheDocument()
+    })
+
+    it("prefills name from prefillTitle without entering edit mode", () => {
+      renderModal({ prefillTitle: "Jan Kowalski" })
+      expect(screen.getByRole("heading", { name: /nowa wizyta/i })).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/anna kowalska/i)).toHaveValue("Jan Kowalski")
     })
   })
 
@@ -68,28 +79,28 @@ describe("AddTaskModal", () => {
     it("does not call onAdd when name is empty and form is submitted", async () => {
       const onAdd = jest.fn()
       renderModal({ onAdd })
-      const submit = screen.getByRole("button", { name: /book session/i })
+      const submit = screen.getByRole("button", { name: /rezerwuj wizytę/i })
       await userEvent.click(submit)
       expect(onAdd).not.toHaveBeenCalled()
     })
 
     it("shows inline error when name is empty and form is submitted", async () => {
       renderModal()
-      const submit = screen.getByRole("button", { name: /book session/i })
+      const submit = screen.getByRole("button", { name: /rezerwuj wizytę/i })
       await userEvent.click(submit)
-      expect(screen.getByText(/please enter the client name/i)).toBeInTheDocument()
+      expect(screen.getByText(/proszę wpisać imię i nazwisko pacjenta/i)).toBeInTheDocument()
     })
   })
 
   describe("conflict and edit mode", () => {
-    it("does not show conflict warning when editing (initialTitle set)", () => {
+    it("does not show conflict warning when editing", () => {
       const dayOfWeek = new Date(TEST_DATE).getDay()
       const firstSlot = (DAY_SLOTS[dayOfWeek] ?? [])[0] ?? "09:00"
       const existingTasks: Task[] = [
         {
           id: "1",
           title: "My Meeting",
-          category: "individual",
+          category: "online",
           date: TEST_DATE,
           time: firstSlot,
           duration: 50,
@@ -98,11 +109,12 @@ describe("AddTaskModal", () => {
       renderModal({
         defaultDate: TEST_DATE,
         existingTasks,
+        editingTaskId: "1",
         initialTitle: "My Meeting",
         initialDescription: "",
-        initialCategory: "individual",
+        initialCategory: "online",
       })
-      expect(screen.queryByText(/this time slot is already booked/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/ten termin jest już zarezerwowany/i)).not.toBeInTheDocument()
     })
 
     it("submit is not disabled by conflict when editing", () => {
@@ -111,8 +123,8 @@ describe("AddTaskModal", () => {
       const existingTasks: Task[] = [
         {
           id: "1",
-          title: "My Meeting",
-          category: "individual",
+          title: "Moja wizyta",
+          category: "online",
           date: TEST_DATE,
           time: firstSlot,
           duration: 50,
@@ -121,15 +133,16 @@ describe("AddTaskModal", () => {
       renderModal({
         defaultDate: TEST_DATE,
         existingTasks,
-        initialTitle: "My Meeting",
+        editingTaskId: "1",
+        initialTitle: "Moja wizyta",
       })
-      const submit = screen.getByRole("button", { name: /save changes/i })
+      const submit = screen.getByRole("button", { name: /zapisz zmiany/i })
       expect(submit).not.toBeDisabled()
     })
   })
 
   describe("time options", () => {
-    it("marks an already-booked slot as disabled in the time dropdown", () => {
+    it("marks booked slots as unavailable in the time dropdown", () => {
       const dayOfWeek = new Date(TEST_DATE).getDay()
       const daySlots = DAY_SLOTS[dayOfWeek] ?? []
       if (daySlots.length === 0) return // skip if this weekday has no slots
@@ -139,7 +152,7 @@ describe("AddTaskModal", () => {
         {
           id: "1",
           title: "Booked",
-          category: "individual",
+          category: "online",
           date: TEST_DATE,
           time: bookedSlot,
           duration: 50,
@@ -148,17 +161,51 @@ describe("AddTaskModal", () => {
       renderModal({ defaultDate: TEST_DATE, defaultTime: bookedSlot, existingTasks })
       const comboboxes = screen.getAllByRole("combobox")
       const timeSelect = comboboxes[1] as HTMLSelectElement
-      const options = within(timeSelect).getAllByRole("option")
-      const bookedOption = options.find((o) => (o as HTMLOptionElement).value === bookedSlot)
+      const bookedOption = within(timeSelect).getByRole("option", {
+        name: new RegExp(`${bookedSlot}.*niedostępny`, "i"),
+      }) as HTMLOptionElement
+      expect(bookedOption.value).toBe(bookedSlot)
       expect(bookedOption).toBeDisabled()
+    })
+
+    it("disables submit when a day has no free slots", () => {
+      const dayOfWeek = new Date(TEST_DATE).getDay()
+      const daySlots = DAY_SLOTS[dayOfWeek] ?? []
+      if (daySlots.length === 0) return
+
+      const existingTasks: Task[] = daySlots.map((slot, index) => ({
+        id: `taken-${index}`,
+        title: `Taken ${index}`,
+        category: "online",
+        date: TEST_DATE,
+        time: slot,
+        duration: 50,
+      }))
+
+      renderModal({ defaultDate: TEST_DATE, existingTasks })
+
+      expect(screen.getByRole("button", { name: /rezerwuj wizytę/i })).toBeDisabled()
     })
   })
 
   describe("close", () => {
+    it("keeps the modal open when onAdd rejects the booking", async () => {
+      const onAdd = jest.fn().mockResolvedValue(false)
+      const onClose = jest.fn()
+      renderModal({ onAdd, onClose })
+
+      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+
+      expect(onAdd).toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByRole("heading", { name: /nowa wizyta/i })).toBeInTheDocument()
+    })
+
     it("calls onClose when close button is clicked", async () => {
       const onClose = jest.fn()
       renderModal({ onClose })
-      const closeButton = screen.getByRole("button", { name: /close/i })
+      const closeButton = screen.getByRole("button", { name: /zamknij/i })
       await userEvent.click(closeButton)
       expect(onClose).toHaveBeenCalled()
     })

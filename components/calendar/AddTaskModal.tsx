@@ -2,7 +2,18 @@
 
 import { useState, useMemo, useEffect, useRef } from "react"
 import { X } from "lucide-react"
-import { format, addDays, startOfDay, isWeekend, isBefore, isAfter, addHours, parseISO } from "date-fns"
+import {
+  format,
+  addDays,
+  addMonths,
+  startOfDay,
+  isWeekend,
+  isBefore,
+  isAfter,
+  addHours,
+  parseISO,
+} from "date-fns"
+import { pl } from "date-fns/locale"
 import type { Task, TaskCategory } from "@/lib/calendar-types"
 import {
   CALENDAR_END_HOUR,
@@ -10,7 +21,6 @@ import {
   DAY_SLOTS,
   CATEGORY_COLORS,
 } from "@/lib/calendar-types"
-import { addMonths } from "date-fns"
 
 interface AddTaskModalProps {
   defaultDate: string
@@ -25,8 +35,10 @@ interface AddTaskModalProps {
     time?: string
     duration?: number
     email?: string
-  }) => void
+  }) => void | boolean | Promise<void | boolean>
   initialTitle?: string
+  /** Pre-fills the patient name for a new booking only (e.g. from browser cache). Ignored when `editingTaskId` is set. */
+  prefillTitle?: string
   initialDescription?: string
   initialCategory?: TaskCategory
   editingTaskId?: string
@@ -38,6 +50,8 @@ interface AddTaskModalProps {
   disabledDates?: Set<string>
   /** Admin-blocked individual slots: date → set of blocked times. */
   adminBlockedSlots?: Map<string, Set<string>>
+  /** Last calendar day (inclusive) that can be booked; start-of-day. Defaults to one month from today. */
+  maxBookableDate?: Date
 }
 
 const CATEGORIES: { value: TaskCategory; label: string }[] = [
@@ -74,7 +88,7 @@ function generateAvailableDates(
         dates.push({
           date: current,
           dateStr,
-          label: format(current, "EEE, MMM d"),
+          label: format(current, "EEE, d MMM", { locale: pl }),
         })
       }
     }
@@ -91,6 +105,7 @@ export function AddTaskModal({
   onClose,
   onAdd,
   initialTitle,
+  prefillTitle,
   initialDescription,
   initialCategory,
   editingTaskId,
@@ -99,12 +114,16 @@ export function AddTaskModal({
   daySlots,
   disabledDates,
   adminBlockedSlots,
+  maxBookableDate: maxBookableDateProp,
 }: AddTaskModalProps) {
   const slots = daySlots ?? DAY_SLOTS
-  const isEditing = !!initialTitle
+  const isEditing = Boolean(editingTaskId)
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(now), [now])
-  const maxBookingDate = useMemo(() => addMonths(today, 1), [today])
+  const maxBookingDate = useMemo(
+    () => (maxBookableDateProp ? startOfDay(maxBookableDateProp) : addMonths(today, 1)),
+    [today, maxBookableDateProp],
+  )
   const availableDates = useMemo(
     () => generateAvailableDates(slots, maxBookingDate).filter(
       (d) => !disabledDates?.has(d.dateStr)
@@ -128,13 +147,16 @@ export function AddTaskModal({
     return blocked.has(startSlot)
   }
 
+  const isAdminSlotBlocked = (dateStr: string, slot: string) =>
+    adminBlockedSlots?.get(dateStr)?.has(slot) ?? false
+
   // Ensure default date is valid (weekday within range)
   const validDefaultDate = useMemo(() => {
     const found = availableDates.find(d => d.dateStr === defaultDate)
     return found ? defaultDate : availableDates[0]?.dateStr ?? defaultDate
   }, [defaultDate, availableDates])
 
-  const [title, setTitle] = useState(initialTitle ?? "")
+  const [title, setTitle] = useState(() => (initialTitle ?? prefillTitle ?? "").trim())
   const [description, setDescription] = useState(initialDescription ?? "")
   const [category, setCategory] = useState<TaskCategory>(initialCategory ?? "w_gabinecie")
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
@@ -145,7 +167,7 @@ export function AddTaskModal({
 
   // Initialise time: prefer defaultTime if it's a valid slot for the date, else pick first slot
   const [time, setTime] = useState(() => {
-    const dayTimeSlots = getSlotsForDate(defaultDate, slots)
+    const dayTimeSlots = getSlotsForDate(validDefaultDate, slots)
     if (defaultTime && dayTimeSlots.includes(defaultTime)) return defaultTime
     return dayTimeSlots[0] ?? ""
   })
@@ -173,51 +195,78 @@ export function AddTaskModal({
   }, [availableDates, existingTasks, isEditing, editingTaskId])
 
   const blockedSlots = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
+  const allSlotsForSelectedDate = useMemo(
+    () => (selectedDate ? getSlotsForDate(selectedDate, slots) : []),
+    [selectedDate, slots],
+  )
 
-  // Auto-prefill the first valid date+time when opening a new booking
+  const freeSlotsByDate = useMemo(() => {
+    const map = new Map<string, string[]>()
+
+    for (const { dateStr } of availableDates) {
+      const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
+      const freeSlots = getSlotsForDate(dateStr, slots).filter(
+        (slot) =>
+          isSlotWithinBookingWindow(dateStr, slot) &&
+          fitsInDay(slot) &&
+          !isSlotConflicting(slot, blocked) &&
+          !isAdminSlotBlocked(dateStr, slot),
+      )
+
+      map.set(dateStr, freeSlots)
+    }
+
+    return map
+  }, [availableDates, blockedSlotsByDate, slots, adminBlockedSlots, now, maxBookingDate])
+
+  const freeSlotsForSelectedDate = freeSlotsByDate.get(selectedDate) ?? []
+  const hasFreeSlotsForSelectedDate = freeSlotsForSelectedDate.length > 0
+
+  // Auto-prefill date+time when opening a new booking: prefer calendar-chosen day, else first available.
   const didInitialPrefill = useRef(false)
   useEffect(() => {
     if (isEditing) return
     if (defaultTime) return
     if (didInitialPrefill.current) return
 
+    const tryPrefillDate = (dateStr: string): boolean => {
+      const freeSlots = freeSlotsByDate.get(dateStr) ?? []
+      const nextSlot = freeSlots[0]
+      if (!nextSlot) return false
+      setSelectedDate(dateStr)
+      setTime(nextSlot)
+      return true
+    }
+
+    const chosenInList = availableDates.some((d) => d.dateStr === defaultDate)
+    if (chosenInList && tryPrefillDate(defaultDate)) {
+      didInitialPrefill.current = true
+      return
+    }
+
     for (const { dateStr } of availableDates) {
-      const dayTimeSlots = getSlotsForDate(dateStr, slots)
-      const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
-      for (const slot of dayTimeSlots) {
-        if (!isSlotWithinBookingWindow(dateStr, slot)) continue
-        if (!fitsInDay(slot)) continue
-        if (isSlotConflicting(slot, blocked)) continue
-        setSelectedDate(dateStr)
-        setTime(slot)
+      if (tryPrefillDate(dateStr)) {
         didInitialPrefill.current = true
         return
       }
     }
     didInitialPrefill.current = true
-  }, [isEditing, defaultTime, availableDates, blockedSlotsByDate, now, maxBookingDate])
+  }, [isEditing, defaultTime, defaultDate, availableDates, freeSlotsByDate])
 
   // When date changes, validate current time is still a valid slot for the new day
   useEffect(() => {
     if (isEditing) return
-    if (!selectedDate || !time) return
+    if (!selectedDate) return
 
-    const dayTimeSlots = getSlotsForDate(selectedDate, slots)
-    const blocked = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
-    const selectionInvalid =
-      !dayTimeSlots.includes(time) ||
-      !isSlotWithinBookingWindow(selectedDate, time) ||
-      isSlotConflicting(time, blocked)
-
-    if (!selectionInvalid) return
-
-    for (const slot of dayTimeSlots) {
-      if (!isSlotWithinBookingWindow(selectedDate, slot)) continue
-      if (isSlotConflicting(slot, blocked)) continue
-      setTime(slot)
+    if (!freeSlotsForSelectedDate.length) {
+      if (time !== "") setTime("")
       return
     }
-  }, [selectedDate, isEditing, blockedSlotsByDate, now, maxBookingDate])
+
+    if (time && freeSlotsForSelectedDate.includes(time)) return
+
+    setTime(freeSlotsForSelectedDate[0] ?? "")
+  }, [selectedDate, isEditing, freeSlotsForSelectedDate, time])
 
   const wouldConflict = useMemo(() => {
     if (!time) return false
@@ -227,60 +276,69 @@ export function AddTaskModal({
   const dateEnabledMap = useMemo(() => {
     const map = new Map<string, boolean>()
     for (const { dateStr } of availableDates) {
-      const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
-      const dayTimeSlots = getSlotsForDate(dateStr, slots)
-      const enabled = dayTimeSlots.some(
-        (slot) =>
-          isSlotWithinBookingWindow(dateStr, slot) &&
-          fitsInDay(slot) &&
-          !isSlotConflicting(slot, blocked)
-      )
-      map.set(dateStr, enabled)
+      map.set(dateStr, (freeSlotsByDate.get(dateStr) ?? []).length > 0)
     }
     return map
-  }, [availableDates, blockedSlotsByDate, now, maxBookingDate])
+  }, [availableDates, freeSlotsByDate])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
     if (!title.trim()) {
-      setNameError("Please enter the client name.")
+      setNameError("Proszę wpisać imię i nazwisko pacjenta.")
       return
     }
 
     if (showEmailField) {
       const trimmed = email.trim()
       if (!trimmed) {
-        setEmailError("Please enter the client email.")
+        setEmailError("Proszę wpisać email pacjenta.")
         return
       }
       if (!isValidEmail(trimmed)) {
-        setEmailError("Please enter a valid email address.")
+        setEmailError("Proszę wpisać poprawny email pacjenta.")
         return
       }
     }
 
     if (!fitsInDay(time)) {
-      alert(`This session would end after ${CALENDAR_END_HOUR}:00. Please choose an earlier time.`)
+      alert(`Wizyta kończy się po ${CALENDAR_END_HOUR}:00. Proszę wybrać wcześniejszą godzinę.`)
+      return
+    }
+
+    if (!time || !hasFreeSlotsForSelectedDate) {
+      alert("Brak wolnych terminów w tym dniu.")
       return
     }
 
     if (!isEditing && wouldConflict) {
-      alert("This time slot is already booked. Please choose a different time.")
+      alert("Ten termin jest już zarezerwowany. Proszę wybrać inny termin.")
       return
     }
     setIsSubmitting(true)
     setNameError(null)
     setEmailError(null)
-    onAdd({
-      title: title.trim(),
-      description: description.trim() || undefined,
-      category,
-      date: selectedDate,
-      time: time || undefined,
-      duration: SESSION_DURATION,
-      email: showEmailField ? email.trim() : undefined,
-    })
+    let result: void | boolean
+    try {
+      result = await onAdd({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        category,
+        date: selectedDate,
+        time: time || undefined,
+        duration: SESSION_DURATION,
+        email: showEmailField ? email.trim() : undefined,
+      })
+    } catch {
+      setIsSubmitting(false)
+      return
+    }
+
+    if (result === false) {
+      setIsSubmitting(false)
+      return
+    }
+
     onClose()
   }
 
@@ -309,12 +367,12 @@ export function AddTaskModal({
       >
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-slate-800 text-lg font-bold font-sans">
-            {isEditing ? "Edit Session" : "New Session"}
+            {isEditing ? "Edytuj wizytę" : "Nowa wizyta"}
           </h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-black/10 transition-colors"
-            aria-label="Close"
+            aria-label="Zamknij"
           >
             <X className="w-4 h-4 text-slate-500" />
           </button>
@@ -323,10 +381,15 @@ export function AddTaskModal({
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {/* Name */}
           <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Client name
+            <label
+              htmlFor="task-title"
+              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+            >
+              Imię i nazwisko pacjenta
             </label>
             <input
+              id="task-title"
+              name="title"
               autoFocus
               value={title}
               onChange={(e) => {
@@ -346,16 +409,22 @@ export function AddTaskModal({
 
           {showEmailField && (
             <div>
-              <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
+              <label
+                htmlFor="task-email"
+                className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              >
                 Email
               </label>
               <input
+                id="task-email"
+                name="email"
+                type="email"
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value)
                   if (emailError) setEmailError(null)
                 }}
-                placeholder="client@example.com"
+                placeholder="imie.nazwisko@poczta.com"
                 className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
                 style={inputStyle}
               />
@@ -369,10 +438,15 @@ export function AddTaskModal({
 
           {/* Date selector */}
           <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Date (next 2 weeks, weekdays only)
+            <label
+              htmlFor="task-date"
+              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+            >
+              Data (dni robocze)
             </label>
             <select
+              id="task-date"
+              name="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans cursor-pointer"
@@ -388,40 +462,46 @@ export function AddTaskModal({
 
           {/* Time selector — shows only the psychologist slots for the selected day */}
           <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Time <span className="normal-case font-normal text-slate-400">(50-min session)</span>
+            <label
+              htmlFor="task-time"
+              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+            >
+              Godzina <span className="normal-case font-normal text-slate-500">(wizyta 50-min)</span>
             </label>
             <select
+              id="task-time"
+              name="time"
               value={time}
               onChange={(e) => setTime(e.target.value)}
-              className="w-full rounded-xl px-3 py-2.5 text-sm font-sans cursor-pointer"
+              className="w-full rounded-xl px-3 py-2.5 text-sm font-sans cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
               style={{ ...inputStyle, WebkitAppearance: "none" }}
             >
-              {getSlotsForDate(selectedDate, slots).map(slot => {
-                const isOutsideWindow = !isSlotWithinBookingWindow(selectedDate, slot)
-                const isConflicting = isSlotConflicting(slot, blockedSlots)
-                const isAdminBlocked = adminBlockedSlots?.get(selectedDate)?.has(slot) ?? false
-                const isDisabled = isOutsideWindow || isConflicting || isAdminBlocked
+              {!time && (
+                <option value="" disabled>
+                  Wybierz godzinę
+                </option>
+              )}
+              {allSlotsForSelectedDate.map((slot) => {
+                const isAvailable = freeSlotsForSelectedDate.includes(slot)
                 return (
-                  <option
-                    key={slot}
-                    value={slot}
-                    disabled={isDisabled}
-                    style={{
-                      background: isDisabled ? "#fef2f2" : "#fff",
-                      color: isDisabled ? "#ef4444" : "#1e293b",
-                    }}
-                  >
-                    {slot}
-                    {isConflicting
-                      ? " (booked)"
-                      : isOutsideWindow
-                        ? " (unavailable)"
-                        : ""}
-                  </option>
+                <option key={slot} value={slot} disabled={!isAvailable}>
+                  {isAvailable ? slot : `${slot} (niedostępny)`}
+                </option>
                 )
               })}
             </select>
+            {!hasFreeSlotsForSelectedDate && (
+              <div
+                className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold font-sans"
+                style={{
+                  background: "rgba(254,226,226,0.25)",
+                  border: "1.5px dashed rgba(239,68,68,0.3)",
+                  color: "#b91c1c",
+                }}
+              >
+                brak wolnych terminów
+              </div>
+            )}
           </div>
 
           {/* Conflict warning (only when creating a new session) */}
@@ -434,14 +514,14 @@ export function AddTaskModal({
                 color: "#991b1b",
               }}
             >
-              This time slot is already booked. Choose a different time.
+             Ten termin jest już zarezerwowany. Wybierz inny termin.
             </div>
           )}
 
           {/* Session type */}
           <div>
             <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Session type
+              Typ wizyty
             </label>
             <div className="flex gap-2 flex-wrap">
               {CATEGORIES.map((cat) => {
@@ -472,13 +552,18 @@ export function AddTaskModal({
 
           {/* Notes */}
           <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
-              Notes
+            <label
+              htmlFor="task-description"
+              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+            >
+              Notatki
             </label>
             <textarea
+              id="task-description"
+              name="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional notes..."
+              placeholder="Opis dodatkowy..."
               rows={2}
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 resize-none"
               style={inputStyle}
@@ -488,7 +573,7 @@ export function AddTaskModal({
           {/* Submit */}
           <button
             type="submit"
-            disabled={(!isEditing && wouldConflict) || isSubmitting}
+            disabled={(!isEditing && wouldConflict) || isSubmitting || !hasFreeSlotsForSelectedDate}
             className="w-full py-3 rounded-xl font-bold font-sans text-sm transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             style={{
               backgroundColor: "#0C115B",
@@ -498,8 +583,8 @@ export function AddTaskModal({
             }}
           >
             {isSubmitting
-              ? (isEditing ? "Saving..." : "Booking...")
-              : isEditing ? "Save changes" : "Book session"}
+              ? (isEditing ? "Zapisywanie..." : "Rezerwowanie...")
+              : isEditing ? "Zapisz zmiany" : "Rezerwuj wizytę"}
           </button>
         </form>
       </div>
