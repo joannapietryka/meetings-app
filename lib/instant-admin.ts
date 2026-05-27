@@ -1,4 +1,31 @@
 type InstantAdminError = Error & { status?: number; body?: unknown }
+const INSTANT_ADMIN_TIMEOUT_MS = 12000
+
+export async function instantAdminDeleteUser(userId: string): Promise<void> {
+  const appId = requireEnv("NEXT_PUBLIC_INSTANT_APP_ID")
+  const adminToken = requireEnv("INSTANT_ADMIN_TOKEN")
+
+  const res = await fetch(`https://api.instantdb.com/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      "App-Id": appId,
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(INSTANT_ADMIN_TIMEOUT_MS),
+  })
+
+  if (!res.ok && res.status !== 404) {
+    const err: InstantAdminError = new Error("Instant admin delete user failed")
+    err.status = res.status
+    try {
+      err.body = await res.json()
+    } catch {
+      err.body = await res.text()
+    }
+    throw err
+  }
+}
 
 function requireEnv(name: string): string {
   const v = process.env[name]
@@ -19,6 +46,7 @@ export async function instantAdminQuery<T>(body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(INSTANT_ADMIN_TIMEOUT_MS),
   })
 
   if (!res.ok) {
@@ -48,6 +76,7 @@ export async function instantAdminTransact(body: { steps: unknown[] }): Promise<
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(INSTANT_ADMIN_TIMEOUT_MS),
   })
 
   if (!res.ok) {

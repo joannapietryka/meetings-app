@@ -11,8 +11,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "Weekly Planner - Liquid Glass UI",
-  description: "Beautiful weekly calendar with drag-and-drop task management using a liquid glass aesthetic",
+  title: "Planer wizyt  - psycholog Katarzyna Pietryka",
+  description: "Planer wizyt dostępnny dla pacjentów psycholog Katarzyna Pietryka",
   generator: "v0.app",
 }
 

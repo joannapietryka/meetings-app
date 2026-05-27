@@ -247,7 +247,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <h2 className="text-slate-800 font-bold font-sans">Uprawnieni użytkownicy</h2>
             </div>
             <p className="text-slate-500 text-xs font-sans mb-4 leading-relaxed">
-              Tylko te adresy e-mail mogą rezerwować wizyty. Jeśli lista jest pusta — dostęp mają wszyscy.
+              Tylko te adresy e-mail mogą rezerwować wizyty.
             </p>
 
             {/* Add email */}
@@ -258,7 +258,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 onChange={(e) => { setNewEmail(e.target.value); setEmailError("") }}
                 onKeyDown={(e) => e.key === "Enter" && addUser()}
                 placeholder="email@example.com"
-                className="flex-1 rounded-xl px-3 py-2 text-sm font-sans placeholder:text-slate-400 transition-colors"
+                className="flex-1 rounded-xl px-3 py-2 text-sm font-sans placeholder:text-slate-600 transition-colors"
                 style={inputStyle}
               />
               <button
@@ -276,7 +276,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
 
             {/* User list */}
             {allowedUsers.length === 0 ? (
-              <p className="text-slate-400 text-xs font-sans italic py-3 text-center">
+              <p className="text-slate-600 text-xs font-sans italic py-3 text-center">
                 Brak ograniczeń — wszyscy mogą rezerwować
               </p>
             ) : (

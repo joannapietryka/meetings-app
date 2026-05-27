@@ -8,7 +8,7 @@ describe("TaskCard", () => {
   const task: Task = {
     id: "t1",
     title: "Test meeting",
-    category: "individual",
+    category: "online",
     date: "2026-03-17",
     time: "09:00",
     duration: 50,

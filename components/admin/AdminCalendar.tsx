@@ -471,10 +471,10 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 before:content-[''] 
                 before:absolute 
                 before:inset-0 
-                before:bg-[url('/images/rose-bg-1.jpg')] 
+                before:bg-[url('/images/u-bg.jpg')] 
                 before:bg-cover 
                 before:bg-center 
-                before:opacity-90 
+                before:opacity-80 
                 before:z-[-1]"
               >
       <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
@@ -499,8 +499,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               <CalendarDays className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Weekly Planner</h1>
-              <p className="text-slate-500 text-xs font-sans">{weekLabel}</p>
+              <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Planer wizyt</h1>
+              <p className="text-slate-700 text-xs font-sans">{weekLabel}</p>
             </div>
           </div>
 
@@ -521,7 +521,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans text-slate-700 transition-all duration-200 hover:bg-white/40"
               style={{ border: "1px solid rgba(0,0,0,0.1)" }}
             >
-              Today
+              Dzisiaj
             </button>
             <button
               onClick={() => {
@@ -551,7 +551,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               }}
             >
               <Plus className="w-4 h-4" />
-              New Meeting
+              Dodaj wizytę
             </button>
           </div>
         </div>
@@ -570,7 +570,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                     backgroundColor: colors.dot,
                   }}
                 />
-                <span className="text-slate-600 text-[11px] font-sans">{label}</span>
+                <span className="text-slate-800 text-[11px] font-sans">{label}</span>
               </div>
             )
           })}
@@ -581,13 +581,13 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 backgroundColor: "rgba(239, 68, 68, 1)",
               }}
             />
-            <span className="text-slate-600 text-[11px] font-sans">Termin niedostępny</span>
+            <span className="text-slate-800 text-[11px] font-sans">Termin niedostępny</span>
           </div>
-          <span className="ml-auto flex items-center gap-2 text-slate-400 text-[11px] font-sans">
-            <span>Drag meetings between days · Click a slot to add</span>
+          <span className="ml-auto flex items-center gap-2 text-slate-600 text-[11px] font-sans">
+            <span>Przeciągaj spotkania między dniami · Kliknij slot, aby dodać</span>
             <span className="flex items-center gap-1">
               <Ban className="w-3 h-3" />
-              <span>Drop on occupied time disabled</span>
+              <span>Pola zajęte są wyłączone</span>
             </span>
           </span>
         </div>
@@ -616,7 +616,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                   className="absolute right-0 flex justify-end pr-2"
                   style={{ top: (hour - CALENDAR_START_HOUR) * 60 * PX_PER_MINUTE }}
                 >
-                  <span className="text-slate-500 text-[10px] font-sans -translate-y-1.5 leading-none tabular-nums">
+                  <span className="text-slate-800 text-[10px] font-sans -translate-y-1.5 leading-none tabular-nums">
                     {hour}:00
                   </span>
                 </div>
@@ -718,7 +718,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             border: "1px solid rgba(12,17,91,0.6)",
           }}
         >
-          Log out
+          Wyloguj się
         </button>
       </footer>
     </div>

@@ -13,6 +13,15 @@ const adminEmailRuleLiteral =
         .join(", ")}]`
 
 const rules = {
+  // OTP sessions are server-only — no client can read or write them directly
+  otpSessions: {
+    allow: {
+      view: "false",
+      create: "false",
+      update: "false",
+      delete: "false",
+    },
+  },
   meetings: {
     allow: {
       view: "auth.id != null && (isAdmin || isOwner)",

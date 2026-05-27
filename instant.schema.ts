@@ -18,6 +18,12 @@ export default i.schema({
       day: i.number(),    // 1=Mon … 5=Fri (matches Date.getDay())
       slots: i.string(),  // JSON-serialised string[] of "HH:MM" times
     }),
+    otpSessions: i.entity({
+      email: i.string(),
+      hashedCode: i.string(),   // HMAC-SHA256 hex, never stored plaintext
+      expiresAt: i.string(),    // ISO timestamp — 5 min TTL
+      attempts: i.number(),     // max 5 before lockout
+    }),
     meetings: i.entity({
       id: i.string(),
       title: i.string(),

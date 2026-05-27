@@ -45,7 +45,7 @@ All tests live under the `__tests__` folder:
 
 - `__tests__/components/GuestDashboard.test.tsx`
   - Component tests for the guest dashboard:
-    - Renders **“Your meetings”** header and **“Log out”** button.
+    - Renders **“Moje wizyty”** header and **“Wyloguj się”** button.
     - Handles loading (`useQuery` `isLoading`) and error states.
     - Enforces **limit of 3 meetings per guest**:
       - `+ Add meeting` enabled when < 3 meetings.
