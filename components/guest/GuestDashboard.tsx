@@ -801,7 +801,7 @@ export function GuestDashboard() {
             </div>
             <div className="min-w-0">
               <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Moje wizyty</h1>
-              <p className="text-slate-700 text-xs font-sans">
+              <p className="text-slate-800 text-xs font-sans">
                 Maks. 1 wizyta w tygodniu, 4 w miesiącu, tylko dni robocze i 30 dni do przodu.
               </p>
             </div>
@@ -837,7 +837,16 @@ export function GuestDashboard() {
               </div>
             )
           })}
-          <span className="sm:ml-auto text-slate-600 text-[11px] font-sans">
+          <div className="flex items-center gap-1.5">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{
+                backgroundColor: "rgba(239, 68, 68, 1)",
+              }}
+            />
+            <span className="text-slate-800 text-[11px] font-sans">Termin niedostępny</span>
+          </div>
+          <span className="sm:ml-auto text-slate-800 text-[11px] font-sans">
             Kliknij dzień, aby dodać lub edytować wizytę
           </span>
         </div>
@@ -919,7 +928,7 @@ export function GuestDashboard() {
             </div>
           </div>
 
-          <div className="flex gap-1.5 text-center text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+          <div className="flex gap-1.5 text-center text-[10px] sm:text-xs font-semibold text-slate-800 uppercase tracking-wide mb-1.5">
             {["pon", "wt", "śr", "czw", "pt", "sob", "nd"].map((wd, idx) => (
               <div
                 key={wd}
@@ -969,7 +978,7 @@ export function GuestDashboard() {
 
                   const cellClass = `relative overflow-hidden rounded-xl flex h-full flex-col transition-colors text-slate-800 w-full ${
                     isWeekendCell
-                      ? "min-h-[92px] self-stretch items-center justify-center px-1 py-2 text-center"
+                      ? "min-h-[92px] self-stretch items-center justify-start px-1 py-2 text-center"
                       : "min-h-[88px] sm:min-h-[112px] p-2 items-start text-left"
                   } ${interactiveClass} ${isTodayCell ? "ring-2 ring-[#0C115B]/40" : ""} ${
                     !inMonth ? "text-slate-400" : ""
@@ -1562,7 +1571,7 @@ export function GuestDashboard() {
             <p className="text-slate-600 text-sm font-sans leading-relaxed mb-1">
               Twoje konto zostanie trwale usunięte. Wizyty zostaną zachowane w systemie w formie anonimowej.
             </p>
-            <p className="text-slate-500 text-xs font-sans leading-relaxed mb-5">Tej operacji nie można cofnąć.</p>
+            <p className="text-slate-800 text-xs font-sans leading-relaxed mb-5">Tej operacji nie można cofnąć.</p>
             <div className="flex gap-3">
               <button
                 type="button"

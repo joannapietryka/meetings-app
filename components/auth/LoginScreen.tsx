@@ -219,7 +219,7 @@ export function LoginScreen() {
         {step === "email" && (
           <form onSubmit={handleSendCode} className="flex flex-col gap-4">
             <div>
-              <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
+              <label className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
                 Email
               </label>
               <input
@@ -231,7 +231,7 @@ export function LoginScreen() {
                 className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
                 style={inputStyle}
               />
-              <p className="mt-2 text-[11px] text-slate-500 font-sans">
+              <p className="mt-2 text-[11px] text-slate-800 font-sans">
                 Wyślemy 6-cyfrowy kod na Twój adres e-mail.
               </p>
             </div>
@@ -250,7 +250,7 @@ export function LoginScreen() {
               {isSending ? "Wysyłanie…" : "Wyślij kod"}
             </button>
 
-            <p className="text-[11px] text-slate-500 font-sans text-center leading-relaxed">
+            <p className="text-[11px] text-slate-800 font-sans text-center leading-relaxed">
               Wpisując e-mail, zgadzasz się na przetwarzanie danych zgodnie z{" "}
               <Link
                 href="/polityka-prywatnosci"
@@ -267,15 +267,15 @@ export function LoginScreen() {
         {step === "code" && (
           <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
             <div>
-              <p className="text-slate-600 text-xs font-sans">
+              <p className="text-slate-800 text-xs font-sans">
                 Wysłaliśmy kod na{" "}
                 <span className="font-semibold">{sentEmail}</span>.{" "}
-                <span className="text-slate-400">Kod wygasa za 5 minut.</span>
+                <span className="text-slate-800">Kod wygasa za 5 minut.</span>
               </p>
             </div>
 
             <div>
-              <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
+              <label className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
                 Kod 6-cyfrowy
               </label>
               <input

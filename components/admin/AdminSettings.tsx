@@ -608,7 +608,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                           {formatDate(b.date)}
                         </span>
                         {b.reason && (
-                          <span className="text-slate-500 text-xs font-sans truncate">
+                          <span className="text-slate-800 text-xs font-sans truncate">
                             — {b.reason}
                           </span>
                         )}
