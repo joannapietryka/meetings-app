@@ -198,7 +198,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
             className="w-1.5 h-1.5 rounded-full flex-shrink-0"
             style={{ backgroundColor: colors.dot }}
           />
-          <p className="text-slate-700 text-[11px] font-semibold leading-snug line-clamp-2 font-sans">
+          <p className="text-slate-800 text-[11px] font-semibold leading-snug line-clamp-2 font-sans">
             {task.title}
           </p>
         </div>
@@ -206,7 +206,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
         {task.time && (
           <div className="flex items-center gap-1">
             <Clock className="w-2 h-2 text-slate-400 flex-shrink-0" />
-            <span className="text-slate-500 text-[9px] font-sans">{task.time}</span>
+            <span className="text-slate-800 text-[9px] font-sans">{task.time}</span>
           </div>
         )}
       </div>

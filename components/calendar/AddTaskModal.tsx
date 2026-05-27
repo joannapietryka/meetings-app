@@ -383,7 +383,7 @@ export function AddTaskModal({
           <div>
             <label
               htmlFor="task-title"
-              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
               Imię i nazwisko pacjenta
             </label>
@@ -411,7 +411,7 @@ export function AddTaskModal({
             <div>
               <label
                 htmlFor="task-email"
-                className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+                className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
               >
                 Email
               </label>
@@ -440,7 +440,7 @@ export function AddTaskModal({
           <div>
             <label
               htmlFor="task-date"
-              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
               Data (dni robocze)
             </label>
@@ -464,9 +464,9 @@ export function AddTaskModal({
           <div>
             <label
               htmlFor="task-time"
-              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
-              Godzina <span className="normal-case font-normal text-slate-500">(wizyta 50-min)</span>
+              Godzina <span className="normal-case font-normal text-slate-600">(wizyta 50-min)</span>
             </label>
             <select
               id="task-time"
@@ -520,7 +520,7 @@ export function AddTaskModal({
 
           {/* Session type */}
           <div>
-            <label className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
+            <label className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
               Typ wizyty
             </label>
             <div className="flex gap-2 flex-wrap">
@@ -554,7 +554,7 @@ export function AddTaskModal({
           <div>
             <label
               htmlFor="task-description"
-              className="block text-slate-500 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
               Notatki
             </label>

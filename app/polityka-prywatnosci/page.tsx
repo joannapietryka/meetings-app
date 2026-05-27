@@ -50,7 +50,7 @@ export default function PolitykaPrywatnosci() {
           Polityka prywatności
         </h1>
 
-        <div className="flex flex-col gap-6 text-slate-700 font-sans text-sm leading-relaxed">
+        <div className="flex flex-col gap-6 text-slate-800 font-sans text-sm leading-relaxed">
           <section>
             <h2 className="font-bold text-slate-800 mb-1">1. Administrator danych</h2>
             <p>
@@ -62,7 +62,7 @@ export default function PolitykaPrywatnosci() {
           <section>
             <h2 className="font-bold text-slate-800 mb-1">2. Zakres przetwarzanych danych</h2>
             <p className="mb-2">Przetwarzamy następujące dane:</p>
-            <ul className="list-disc list-inside space-y-1 text-slate-600">
+            <ul className="list-disc list-inside space-y-1 text-slate-800">
               <li>adres e-mail użytkownika</li>
               <li>informacje o umówionych wizytach</li>
             </ul>
@@ -71,7 +71,7 @@ export default function PolitykaPrywatnosci() {
           <section>
             <h2 className="font-bold text-slate-800 mb-1">3. Cel przetwarzania danych</h2>
             <p className="mb-2">Dane przetwarzane są w celu:</p>
-            <ul className="list-disc list-inside space-y-1 text-slate-600">
+            <ul className="list-disc list-inside space-y-1 text-slate-800">
               <li>umożliwienia logowania do aplikacji (za pomocą jednorazowego kodu wysyłanego e-mailem)</li>
               <li>zarządzania wizytami</li>
             </ul>
@@ -80,7 +80,7 @@ export default function PolitykaPrywatnosci() {
           <section>
             <h2 className="font-bold text-slate-800 mb-1">4. Podstawa prawna przetwarzania</h2>
             <p className="mb-2">Dane przetwarzane są na podstawie:</p>
-            <ul className="list-disc list-inside space-y-1 text-slate-600">
+            <ul className="list-disc list-inside space-y-1 text-slate-800">
               <li>art. 6 ust. 1 lit. b RODO – przetwarzanie niezbędne do wykonania usługi</li>
             </ul>
           </section>
@@ -104,7 +104,7 @@ export default function PolitykaPrywatnosci() {
           <section>
             <h2 className="font-bold text-slate-800 mb-1">7. Prawa użytkownika</h2>
             <p className="mb-2">Użytkownik ma prawo do:</p>
-            <ul className="list-disc list-inside space-y-1 text-slate-600 mb-2">
+            <ul className="list-disc list-inside space-y-1 text-slate-800 mb-2">
               <li>dostępu do swoich danych</li>
               <li>ich poprawiania</li>
               <li>usunięcia</li>
