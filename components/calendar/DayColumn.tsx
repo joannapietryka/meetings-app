@@ -90,8 +90,8 @@ export function DayColumn({
             backdropFilter: "blur(10px)",
           }}
         >
-          <p className="text-slate-400 text-[9px] font-semibold uppercase tracking-widest font-sans">{dayName}</p>
-          <p className="text-slate-400 text-sm font-bold font-sans leading-tight">{dayNum}</p>
+          <p className="text-slate-600 text-[9px] font-semibold uppercase tracking-widest font-sans">{dayName}</p>
+          <p className="text-slate-600 text-sm font-bold font-sans leading-tight">{dayNum}</p>
         </div>
         <div
           className="flex-1 mt-2 rounded-xl flex items-center justify-center"
@@ -102,7 +102,7 @@ export function DayColumn({
           }}
         >
           <span
-            className="text-slate-300 text-[9px] font-sans"
+            className="text-slate-800 text-[9px] font-sans"
             style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
           >
             Weekend
@@ -204,7 +204,7 @@ export function DayColumn({
               top: (hour - CALENDAR_START_HOUR) * 60 * PX_PER_MINUTE,
               borderTop: hour === CALENDAR_START_HOUR
                 ? "none"
-                : "1px solid rgba(0,0,0,0.07)",
+                : "1px solid rgba(0,0,0,0.1)",
             }}
           />
         ))}
@@ -248,7 +248,7 @@ export function DayColumn({
                   className="text-[9px] font-sans"
                   style={{ color: slotBlocked ? "#ef4444" : undefined }}
                 >
-                  {slotBlocked ? "niedostępny" : "Available"}
+                  {slotBlocked ? "niedostępny" : "dostępny"}
                 </span>
               </div>
               {isBookable && (
