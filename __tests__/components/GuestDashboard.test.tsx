@@ -8,159 +8,191 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { GuestDashboard } from "@/components/guest/GuestDashboard"
 import { db } from "@/lib/db"
+import { DAY_SLOTS } from "@/lib/calendar-types"
 
 const mockUser = { id: "guest-user-1", email: "guest@test.com" }
 
-jest.mock("@/components/calendar/AddTaskModal", () => {
-  const React = require("react")
-  return {
-    AddTaskModal: (props: any) => {
-      // Simulate the user saving the meeting immediately.
-      React.useEffect(() => {
-        props.onAdd({
-          title: "Updated meeting",
-          description: "Updated description",
-          category: props.initialCategory ?? "bed1",
-          date: props.defaultDate ?? "2026-03-18",
-          time: "10:00",
-          duration: 30,
-        })
-      }, [])
+jest.mock("@/components/calendar/AddTaskModal", () => ({
+  AddTaskModal: (props: {
+    defaultDate?: string
+    editingTaskId?: string
+    initialTitle?: string
+    onAdd: (p: Record<string, unknown>) => void
+    onClose: () => void
+  }) => (
+    <div data-testid="add-task-modal">
+      <span data-testid="modal-default-date">{props.defaultDate}</span>
+      <button
+        type="button"
+        data-testid="modal-save"
+        onClick={() =>
+          props.onAdd({
+            title: props.initialTitle ?? "Zaktualizowana wizyta",
+            description: "Opis zaktualizowanej wizyty",
+            category: "online",
+            date: props.defaultDate ?? "2026-03-18",
+            time: "09:00",
+            duration: 50,
+          })
+        }
+      >
+        Zapisz (test)
+      </button>
+      <button type="button" data-testid="modal-close" onClick={() => props.onClose()}>
+        Zamknij
+      </button>
+    </div>
+  ),
+}))
 
-      return null
-    },
-  }
-})
-
-function mockMeetings(meetings: Array<{ id: string; userId?: string; title: string; category: string; date: string; time?: string; duration?: number }>) {
+function mockMeetings(
+  meetings: Array<{
+    id: string
+    userId?: string
+    title: string
+    category: string
+    date: string
+    time?: string
+    duration?: number
+  }>,
+) {
   ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
-  ;(db.useQuery as jest.Mock).mockReturnValue({
-    isLoading: false,
-    error: null,
-    data: { meetings },
+  ;(db.useQuery as jest.Mock).mockImplementation((q: Record<string, unknown>) => {
+    if ("meetings" in q) {
+      return { isLoading: false, error: null, data: { meetings } }
+    }
+    if ("blockedDates" in q) {
+      return { isLoading: false, error: null, data: { blockedDates: [] } }
+    }
+    if ("blockedSlots" in q) {
+      return { isLoading: false, error: null, data: { blockedSlots: [] } }
+    }
+    if ("scheduleSlots" in q) {
+      return { isLoading: false, error: null, data: { scheduleSlots: [] } }
+    }
+    return { isLoading: false, error: null, data: {} }
+  })
+}
+
+function mockFetchWithAvailability(meetings: Array<Record<string, unknown>> = []) {
+  ;(global as any).fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes("/api/guest/availability")) {
+      return {
+        ok: true,
+        json: async () => ({ meetings }),
+      } as any
+    }
+
+    return {
+      ok: true,
+      text: async () => "",
+      json: async () => ({}),
+    } as any
   })
 }
 
 describe("GuestDashboard", () => {
+  let user: ReturnType<typeof userEvent.setup>
+
   beforeEach(() => {
     jest.clearAllMocks()
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] })
+    jest.setSystemTime(new Date("2026-03-15T12:00:00.000Z"))
+    window.sessionStorage.clear()
+    window.localStorage.clear()
+    user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
     mockMeetings([])
+    mockFetchWithAvailability([])
   })
 
-  describe("guest meeting limit (3 meetings)", () => {
-    it("shows Add meeting button enabled when user has 0 meetings", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  describe("calendar and layout", () => {
+    it("renders month calendar", () => {
       mockMeetings([])
       render(<GuestDashboard />)
-      const addButton = screen.getByRole("button", { name: /add meeting/i })
-      expect(addButton).not.toBeDisabled()
-      expect(screen.queryByText(/you can schedule up to 3 meetings/i)).not.toBeInTheDocument()
+      expect(screen.getByTestId("guest-calendar")).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /moje wizyty/i })).toBeInTheDocument()
     })
 
-    it("shows Add meeting button enabled when user has 2 meetings", () => {
-      mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
-      ])
+    it("renders Polish month title", () => {
+      mockMeetings([])
       render(<GuestDashboard />)
-      const addButton = screen.getByRole("button", { name: /add meeting/i })
-      expect(addButton).not.toBeDisabled()
-    })
-
-    it("disables Add meeting button when user has 3 meetings", () => {
-      mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
-        { id: "3", userId: mockUser.id, title: "Three", category: "contract", date: "2026-03-19", time: "14:00", duration: 60 },
-      ])
-      render(<GuestDashboard />)
-      const addButton = screen.getByRole("button", { name: /add meeting/i })
-      expect(addButton).toBeDisabled()
-    })
-
-    it("shows info text that only 3 meetings can be scheduled when at limit", () => {
-      mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-        { id: "2", userId: mockUser.id, title: "Two", category: "bed2", date: "2026-03-18", time: "11:00", duration: 30 },
-        { id: "3", userId: mockUser.id, title: "Three", category: "contract", date: "2026-03-19", time: "14:00", duration: 60 },
-      ])
-      render(<GuestDashboard />)
-      expect(screen.getByText(/you can schedule up to 3 meetings/i)).toBeInTheDocument()
-    })
-
-    it("does not show limit message when under 3 meetings", () => {
-      mockMeetings([
-        { id: "1", userId: mockUser.id, title: "One", category: "bed1", date: "2026-03-17", time: "10:00", duration: 30 },
-      ])
-      render(<GuestDashboard />)
-      expect(screen.queryByText(/you can schedule up to 3 meetings/i)).not.toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /marzec 2026/i })).toBeInTheDocument()
     })
   })
 
   describe("header and layout", () => {
-    it("renders 'Your meetings' heading", () => {
+    it("renders Log out button", () => {
+      mockMeetings([])
       render(<GuestDashboard />)
-      expect(screen.getByRole("heading", { name: /your meetings/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /wyloguj się/i })).toBeInTheDocument()
     })
 
-    it("renders Log out button", () => {
+    it("renders Add meeting button in the header", () => {
+      mockMeetings([])
       render(<GuestDashboard />)
-      expect(screen.getByRole("button", { name: /log out/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /dodaj wizytę/i })).toBeInTheDocument()
     })
   })
 
   describe("loading and error", () => {
     it("renders nothing while loading", () => {
       ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
-      ;(db.useQuery as jest.Mock).mockReturnValue({ isLoading: true, error: null, data: { meetings: [] } })
+      ;(db.useQuery as jest.Mock).mockImplementation((q: Record<string, unknown>) => {
+        if ("meetings" in q) {
+          return { isLoading: true, error: null, data: { meetings: [] } }
+        }
+        return { isLoading: false, error: null, data: {} }
+      })
       const { container } = render(<GuestDashboard />)
       expect(container.firstChild).toBeNull()
     })
 
     it("renders error message when useQuery returns error", () => {
       ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
-      ;(db.useQuery as jest.Mock).mockReturnValue({
-        isLoading: false,
-        error: new Error("Network error"),
-        data: { meetings: [] },
+      ;(db.useQuery as jest.Mock).mockImplementation((q: Record<string, unknown>) => {
+        if ("meetings" in q) {
+          return { isLoading: false, error: new Error("Network error"), data: { meetings: [] } }
+        }
+        return { isLoading: false, error: null, data: {} }
       })
       render(<GuestDashboard />)
-      expect(screen.getByText(/error:/i)).toBeInTheDocument()
+      expect(screen.getByText(/błąd:/i)).toBeInTheDocument()
       expect(screen.getByText(/network error/i)).toBeInTheDocument()
     })
   })
 
   it("fires n8n meeting.deleted with deletedBy=user when guest deletes a meeting", async () => {
-    ;(global as any).fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        text: async () => "",
-      } as any)
-    )
+    mockFetchWithAvailability([])
     const fetchSpy = global.fetch as jest.Mock
 
     mockMeetings([
       {
         id: "m1",
         userId: mockUser.id,
-        title: "My Meeting",
-        category: "bed1",
+        title: "Moja wizyta",
+        category: "online",
         date: "2026-03-17",
-        time: "10:00",
-        duration: 30,
-        // userEmail is not part of the mockMeetings type, but GuestDashboard uses it defensively
+        time: "09:00",
+        duration: 50,
       } as any,
     ])
 
-    // Render and click delete on the meeting card
     render(<GuestDashboard />)
-    const deleteButton = screen.getByRole("button", { name: /delete/i })
-    await userEvent.click(deleteButton)
+    const deleteButton = screen.getByRole("button", { name: /^usuń$/i })
+    await user.click(deleteButton)
 
-    const yesButton = await screen.findByRole("button", { name: /yes/i })
-    await userEvent.click(yesButton)
+    const yesButton = await screen.findByRole("button", { name: /^tak$/i })
+    await user.click(yesButton)
 
     expect(fetchSpy).toHaveBeenCalled()
-    const [, init] = fetchSpy.mock.calls[0]
+    const n8nCall = fetchSpy.mock.calls.find(([url]) => String(url).includes("/api/n8n/meetings"))
+    expect(n8nCall).toBeTruthy()
+    const [, init] = n8nCall as any
     expect(init?.method).toBe("POST")
     const body = JSON.parse((init as any).body)
     expect(body.event).toBe("meeting.deleted")
@@ -168,40 +200,251 @@ describe("GuestDashboard", () => {
     expect(body.meetingId).toBe("m1")
   })
 
-  it("fires n8n meeting.edited with editedBy=user when guest edits a meeting", async () => {
-    ;(global as any).fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        text: async () => "",
-      } as any)
-    )
+  it("fires n8n meeting.edited with editedBy=user when guest saves edit from modal", async () => {
+    mockFetchWithAvailability([])
     const fetchSpy = global.fetch as jest.Mock
 
     mockMeetings([
       {
         id: "m1",
         userId: mockUser.id,
-        title: "My Meeting",
-        category: "bed1",
+        title: "Moja wizyta",
+        category: "online",
         date: "2026-03-17",
-        time: "10:00",
-        duration: 30,
+        time: "09:00",
+        duration: 50,
       } as any,
     ])
 
     render(<GuestDashboard />)
 
-    const editButton = screen.getByRole("button", { name: /edit/i })
-    await userEvent.click(editButton)
+    const editButton = screen.getByRole("button", { name: /edytuj/i })
+    await user.click(editButton)
+
+    expect(screen.getByTestId("add-task-modal")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("modal-save"))
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalled()
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/n8n/meetings"))).toBe(true)
     })
 
-    const [, init] = fetchSpy.mock.calls[0]
+    const n8nCall = fetchSpy.mock.calls.find(([url]) => String(url).includes("/api/n8n/meetings"))
+    expect(n8nCall).toBeTruthy()
+    const [, init] = n8nCall as any
     const body = JSON.parse((init as any).body)
     expect(body.event).toBe("meeting.edited")
     expect(body.editedBy).toBe("user")
     expect(body.meetingId).toBe("m1")
+  })
+
+  it("opens AddTaskModal with selected calendar day as defaultDate", async () => {
+    mockMeetings([])
+    render(<GuestDashboard />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /dodaj wizytę/i })).not.toBeDisabled()
+    })
+
+    await user.click(screen.getByTestId("calendar-day-2026-03-18"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modal-default-date")).toHaveTextContent("2026-03-18")
+    })
+  })
+
+  it("rechecks availability before opening a booking and blocks newly occupied days", async () => {
+    const date = "2026-03-18"
+    const slots = DAY_SLOTS[new Date(date).getDay()] ?? []
+    if (slots.length === 0) return
+
+    let availabilityMeetings: Array<Record<string, unknown>> = []
+    ;(global as any).fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/api/guest/availability")) {
+        return {
+          ok: true,
+          json: async () => ({ meetings: availabilityMeetings }),
+        } as any
+      }
+
+      return {
+        ok: true,
+        text: async () => "",
+        json: async () => ({}),
+      } as any
+    })
+
+    const alertSpy = jest.spyOn(window, "alert").mockImplementation(() => {})
+
+    mockMeetings([])
+    render(<GuestDashboard />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /dodaj wizytę/i })).not.toBeDisabled()
+    })
+
+    availabilityMeetings = slots.map((slot, index) => ({
+      id: `taken-${index}`,
+      date,
+      time: slot,
+      duration: 50,
+    }))
+
+    await user.click(screen.getByTestId(`calendar-day-${date}`))
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith("Brak wolnych terminów w tym dniu.")
+    })
+    expect(screen.queryByTestId("add-task-modal")).not.toBeInTheDocument()
+    expect(
+      ((global.fetch as jest.Mock).mock.calls as Array<[RequestInfo | URL]>).filter(([url]) =>
+        String(url).includes("/api/guest/availability"),
+      ).length,
+    ).toBeGreaterThan(1)
+
+    alertSpy.mockRestore()
+  })
+
+  it("shows retry when availability fetch fails and recovers after retry", async () => {
+    let availabilityAttempts = 0
+    ;(global as any).fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/api/guest/availability")) {
+        availabilityAttempts += 1
+        if (availabilityAttempts === 1) {
+          throw new Error("Błąd połączenia")
+        }
+        return {
+          ok: true,
+          json: async () => ({ meetings: [] }),
+        } as any
+      }
+
+      return {
+        ok: true,
+        text: async () => "",
+        json: async () => ({}),
+      } as any
+    })
+
+    render(<GuestDashboard />)
+
+    const retryButton = await screen.findByRole("button", { name: /ponów pobieranie terminów/i })
+    expect(retryButton).toBeInTheDocument()
+
+    await user.click(retryButton)
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /ponów pobieranie terminów/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it("keeps past visits visible on the calendar grid as disabled", () => {
+    mockMeetings([
+      {
+        id: "m1",
+        userId: mockUser.id,
+        title: "Miniona wizyta",
+        category: "online",
+        date: "2026-03-12",
+        time: "09:00",
+        duration: 50,
+      } as any,
+    ])
+
+    render(<GuestDashboard />)
+
+    const pastCell = screen.getByTestId("calendar-day-2026-03-12")
+    expect(pastCell).toHaveAttribute("aria-disabled", "true")
+    expect(pastCell).toHaveTextContent(/miniona wizyta/i)
+    expect(pastCell).toHaveTextContent(/termin minął/i)
+  })
+
+  it("shows weekly limit info on disabled dates in a booked week", () => {
+    mockMeetings([
+      {
+        id: "m1",
+        userId: mockUser.id,
+        title: "Moja wizyta",
+        category: "online",
+        date: "2026-03-17",
+        time: "09:00",
+        duration: 50,
+      } as any,
+    ])
+
+    render(<GuestDashboard />)
+
+    expect(screen.getAllByText(/maks\. 1 wizyta w tygodniu/i).length).toBeGreaterThan(0)
+  })
+
+  it("shows 'brak wolnych terminów' on a fully booked day", async () => {
+    const date = "2026-03-18"
+    const weekday = new Date(date).getDay()
+    const slots = DAY_SLOTS[weekday] ?? []
+    if (slots.length === 0) return
+
+    mockMeetings([])
+    mockFetchWithAvailability(
+      slots.map((slot, index) => ({
+        id: `taken-${index}`,
+        date,
+        time: slot,
+        duration: 50,
+      })),
+    )
+
+    render(<GuestDashboard />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("calendar-day-2026-03-18")).toHaveTextContent(/brak wolnych terminów/i)
+    })
+  })
+
+  it("uses DB scheduleSlots to mark a fully booked day as unavailable", async () => {
+    const date = "2026-03-18"
+    mockFetchWithAvailability([
+      {
+        id: "taken-1",
+        date,
+        time: "12:00",
+        duration: 50,
+      },
+    ])
+    ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
+    ;(db.useQuery as jest.Mock).mockImplementation((q: Record<string, unknown>) => {
+      if ("meetings" in q) {
+        return {
+          isLoading: false,
+          error: null,
+          data: {
+            meetings: [],
+          },
+        }
+      }
+      if ("blockedDates" in q) {
+        return { isLoading: false, error: null, data: { blockedDates: [] } }
+      }
+      if ("blockedSlots" in q) {
+        return { isLoading: false, error: null, data: { blockedSlots: [] } }
+      }
+      if ("scheduleSlots" in q) {
+        return {
+          isLoading: false,
+          error: null,
+          data: {
+            scheduleSlots: [{ day: 3, slots: JSON.stringify(["12:00"]) }],
+          },
+        }
+      }
+      return { isLoading: false, error: null, data: {} }
+    })
+
+    render(<GuestDashboard />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("calendar-day-2026-03-18")).toHaveTextContent(/brak wolnych terminów/i)
+    })
   })
 })

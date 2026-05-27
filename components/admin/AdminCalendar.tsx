@@ -1,15 +1,16 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import { addDays, addHours, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban } from "lucide-react"
+import { addDays, addHours, addMonths, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban, Settings } from "lucide-react"
 import type { TaskCategory } from "@/lib/calendar-types"
 import {
   CALENDAR_START_HOUR,
   CALENDAR_END_HOUR,
-  SLOT_HEIGHT_PX,
-  SLOT_MINUTES,
-  TOTAL_SLOTS,
+  SESSION_DURATION,
+  PX_PER_MINUTE,
+  GRID_TOTAL_HEIGHT,
+  DAY_SLOTS,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
 } from "@/lib/calendar-types"
@@ -43,21 +44,6 @@ function toDateStr(date: Date): string {
   return format(date, "yyyy-MM-dd")
 }
 
-// Time gutter labels: show full hour labels only
-const TIME_LABELS: string[] = []
-for (let h = CALENDAR_START_HOUR; h <= 17; h++) {
-  TIME_LABELS.push(h === 12 ? "12pm" : h < 12 ? `${h}am` : `${h - 12}pm`)
-}
-
-function generateTimeSlots(): string[] {
-  const slots: string[] = []
-  for (let h = CALENDAR_START_HOUR; h < CALENDAR_END_HOUR; h++) {
-    slots.push(`${String(h).padStart(2, "0")}:00`)
-    slots.push(`${String(h).padStart(2, "0")}:30`)
-  }
-  slots.push(`${String(CALENDAR_END_HOUR).padStart(2, "0")}:00`)
-  return slots
-}
 
 function isUserOwnedMeeting(m: Meeting): boolean {
   // Primary signal for new data.
@@ -72,16 +58,16 @@ function isUserOwnedMeeting(m: Meeting): boolean {
   return true
 }
 
-export function AdminCalendar() {
+export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const today = useMemo(() => startOfDay(new Date()), [])
   const now = useMemo(() => new Date(), [])
-  const maxBookingDate = useMemo(() => addDays(today, 14), [today])
+  const maxBookingDate = useMemo(() => addMonths(today, 1), [today])
   const minBookingDateTime = useMemo(() => addHours(now, 2), [now])
   const currentWeekStart = useMemo(() => startOfWeek(today, { weekStartsOn: 1 }), [today])
 
-  // Calculate the valid week range (3 weeks total)
+  // Navigation range spans the full booking window (today → +1 month)
   const minWeekStart = currentWeekStart
-  const maxWeekStart = addWeeks(currentWeekStart, 2)
+  const maxWeekStart = startOfWeek(maxBookingDate, { weekStartsOn: 1 })
 
   const [weekStart, setWeekStart] = useState(() => currentWeekStart)
   const [modalConfig, setModalConfig] = useState<{ date: string; time?: string } | null>(null)
@@ -92,6 +78,37 @@ export function AdminCalendar() {
   const { isLoading, error, data } = db.useQuery({ meetings: {} })
   const meetings = ((data?.meetings ?? []) as Meeting[]) ?? []
 
+  // Blocked dates (admin-defined: holidays, vacations, etc.)
+  const { data: blockedData } = db.useQuery({ blockedDates: {} })
+  const blockedDateSet = useMemo<Set<string>>(() => {
+    const records = (blockedData?.blockedDates ?? []) as unknown as { date: string }[]
+    return new Set(records.map((r) => r.date))
+  }, [blockedData])
+
+  // Blocked individual slots (specific time on a specific date)
+  const { data: blockedSlotsData } = db.useQuery({ blockedSlots: {} })
+  const blockedSlotMap = useMemo<Map<string, Set<string>>>(() => {
+    const records = (blockedSlotsData?.blockedSlots ?? []) as unknown as { date: string; time: string }[]
+    const map = new Map<string, Set<string>>()
+    for (const r of records) {
+      if (!map.has(r.date)) map.set(r.date, new Set())
+      map.get(r.date)!.add(r.time)
+    }
+    return map
+  }, [blockedSlotsData])
+
+  // Dynamic schedule: read from DB, fall back per-day to hardcoded constants
+  const { data: scheduleData } = db.useQuery({ scheduleSlots: {} })
+  const dynamicDaySlots = useMemo<Record<number, string[]>>(() => {
+    const records = (scheduleData?.scheduleSlots ?? []) as unknown as { day: number; slots: string }[]
+    // Start with hardcoded defaults for every day, then override with DB values where present
+    const map: Record<number, string[]> = { ...DAY_SLOTS }
+    for (const r of records) {
+      try { map[r.day] = JSON.parse(r.slots) } catch {}
+    }
+    return map
+  }, [scheduleData])
+
   const weekEndDate = addDays(weekStart, 6)
   const weekLabel = `${format(weekStart, "MMM d")} – ${format(weekEndDate, "MMM d, yyyy")}`
 
@@ -99,6 +116,10 @@ export function AdminCalendar() {
   const canGoNext = isBefore(weekStart, maxWeekStart)
 
   const isSlotBookable = (date: Date, time: string) => {
+    const dateStr = toDateStr(date)
+    if (blockedDateSet.has(dateStr)) return false
+    if (blockedSlotMap.get(dateStr)?.has(time)) return false
+
     const [h, m] = time.split(":").map(Number)
     const slotDateTime = new Date(date)
     slotDateTime.setHours(h, m, 0, 0)
@@ -114,7 +135,7 @@ export function AdminCalendar() {
 
     const [newH, newM] = time.split(":").map(Number)
     const newStart = newH * 60 + newM
-    const newDuration = moving.duration ?? 30
+    const newDuration = moving.duration ?? SESSION_DURATION
     const newEnd = newStart + newDuration
 
     // Disallow any meeting that would end after 17:00
@@ -136,27 +157,24 @@ export function AdminCalendar() {
   }
 
   const canBookSlotForDay = (dayDate: Date) => (time: string) => {
-    // First apply global booking window rules
     if (!isSlotBookable(dayDate, time)) return false
-    // If we are not currently dragging anything, just use booking rules
+    // Only allow the configured psychologist slots for this weekday
+    const daySlots = dynamicDaySlots[dayDate.getDay()] ?? []
+    if (!daySlots.includes(time)) return false
     if (!draggingId.current) return true
     const dateStr = toDateStr(dayDate)
-    // When dragging, also prevent dropping onto conflicting times
     return !doesConflict(dateStr, time, draggingId.current)
   }
 
   const findNextAvailableSlot = (): { dateStr: string; time: string } | null => {
-    const slots = generateTimeSlots()
-    const startDate = now
-
-    // iterate day by day within booking window
     for (
-      let d = new Date(startDate);
+      let d = new Date(now);
       !isAfter(startOfDay(d), maxBookingDate);
       d = addDays(d, 1)
     ) {
+      const daySlots = dynamicDaySlots[d.getDay()] ?? []
       const dateStr = toDateStr(d)
-      for (const time of slots) {
+      for (const time of daySlots) {
         if (!isSlotBookable(d, time)) continue
         if (doesConflict(dateStr, time, "")) continue
         return { dateStr, time }
@@ -183,13 +201,29 @@ export function AdminCalendar() {
     }
 
     const relativeY = e.clientY - dragOffsetY.current - gridTop
-    const slotIndex = Math.max(0, Math.min(TOTAL_SLOTS - 1, Math.floor(relativeY / SLOT_HEIGHT_PX)))
-    const totalMinutes = CALENDAR_START_HOUR * 60 + slotIndex * SLOT_MINUTES
-    const h = Math.floor(totalMinutes / 60)
-    const m = totalMinutes % 60
-    const newTime = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+    const minutesFromStart = relativeY / PX_PER_MINUTE
+    const absoluteMinutes = CALENDAR_START_HOUR * 60 + minutesFromStart
 
     const targetDateObj = parseISO(targetDate)
+    const targetDaySlots = dynamicDaySlots[targetDateObj.getDay()] ?? []
+
+    if (targetDaySlots.length === 0) {
+      draggingId.current = null
+      return
+    }
+
+    // Snap to the nearest configured slot for that weekday
+    let newTime = targetDaySlots[0]
+    let minDist = Infinity
+    for (const slotTime of targetDaySlots) {
+      const [sh, sm] = slotTime.split(":").map(Number)
+      const dist = Math.abs(sh * 60 + sm - absoluteMinutes)
+      if (dist < minDist) {
+        minDist = dist
+        newTime = slotTime
+      }
+    }
+
     if (!isSlotBookable(targetDateObj, newTime)) {
       draggingId.current = null
       return
@@ -430,14 +464,19 @@ export function AdminCalendar() {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
-      style={{
-        backgroundImage: "url('/images/bg-green-gradient.jpg')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}
-    >
+     className="relative 
+                min-h-screen 
+                flex 
+                flex-col 
+                before:content-[''] 
+                before:absolute 
+                before:inset-0 
+                before:bg-[url('/images/rose-bg-1.jpg')] 
+                before:bg-cover 
+                before:bg-center 
+                before:opacity-90 
+                before:z-[-1]"
+              >
       <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
         <div
           className="max-w-full mx-auto rounded-2xl px-5 py-3.5 flex items-center justify-between"
@@ -542,7 +581,7 @@ export function AdminCalendar() {
                 backgroundColor: "rgba(239, 68, 68, 1)",
               }}
             />
-            <span className="text-slate-600 text-[11px] font-sans">NC (needs confirmation)</span>
+            <span className="text-slate-600 text-[11px] font-sans">Termin niedostępny</span>
           </div>
           <span className="ml-auto flex items-center gap-2 text-slate-400 text-[11px] font-sans">
             <span>Drag meetings between days · Click a slot to add</span>
@@ -566,12 +605,23 @@ export function AdminCalendar() {
             }}
           />
 
-          <div className="flex-shrink-0 pr-2 pt-[52px]" style={{ width: 44 }}>
-            {TIME_LABELS.map((label, i) => (
-              <div key={label} className="flex items-start justify-end" style={{ height: i < TIME_LABELS.length - 1 ? SLOT_HEIGHT_PX * 2 : 0 }}>
-                <span className="text-slate-500 text-[10px] font-sans -translate-y-2 leading-none">{label}</span>
-              </div>
-            ))}
+          <div className="flex-shrink-0 pr-2 pt-[52px]" style={{ width: 50 }}>
+            <div className="relative" style={{ height: GRID_TOTAL_HEIGHT }}>
+              {Array.from(
+                { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
+                (_, i) => CALENDAR_START_HOUR + i,
+              ).map((hour) => (
+                <div
+                  key={hour}
+                  className="absolute right-0 flex justify-end pr-2"
+                  style={{ top: (hour - CALENDAR_START_HOUR) * 60 * PX_PER_MINUTE }}
+                >
+                  <span className="text-slate-500 text-[10px] font-sans -translate-y-1.5 leading-none tabular-nums">
+                    {hour}:00
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="flex gap-2 flex-1 min-w-0">
@@ -590,6 +640,9 @@ export function AdminCalendar() {
                     tasks={meetings.filter((m) => m.date === dateStr) as any}
                     isWeekend={isWeekend}
                     isLocked={isLocked}
+                    isBlocked={blockedDateSet.has(dateStr)}
+                    blockedTimes={blockedSlotMap.get(dateStr)}
+                    scheduledSlots={dynamicDaySlots[dayDate.getDay()] ?? []}
                     canBookSlot={canBookSlotForDay(dayDate)}
                     onDragStart={handleDragStart}
                     onDrop={handleDrop}
@@ -619,6 +672,7 @@ export function AdminCalendar() {
           defaultDate={modalConfig.date}
           defaultTime={modalConfig.time}
           existingTasks={meetings as any}
+          daySlots={dynamicDaySlots}
           initialTitle={editing?.title}
           initialDescription={editing?.description}
           initialCategory={editing?.category}
@@ -633,8 +687,23 @@ export function AdminCalendar() {
         />
       )}
 
-      {/* Bottom bar with logout */}
-      <footer className="px-6 pb-6 flex justify-end">
+      {/* Bottom bar */}
+      <footer className="px-6 pb-6 flex items-center justify-end gap-2">
+        {onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold font-sans text-slate-700 transition-all duration-200 hover:bg-white/50 hover:-translate-y-0.5 active:translate-y-0"
+            style={{
+              background: "rgba(255,255,255,0.35)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgba(255,255,255,0.5)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            }}
+          >
+            <Settings className="w-4 h-4" />
+            Ustawienia
+          </button>
+        )}
         <button
           onClick={() => {
             db.auth.signOut().catch((err: any) => {

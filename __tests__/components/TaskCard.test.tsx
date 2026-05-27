@@ -8,10 +8,10 @@ describe("TaskCard", () => {
   const task: Task = {
     id: "t1",
     title: "Test meeting",
-    category: "bed1",
+    category: "individual",
     date: "2026-03-17",
-    time: "10:00",
-    duration: 30,
+    time: "09:00",
+    duration: 50,
   }
 
   it("clicking delete icon does not trigger edit click", async () => {

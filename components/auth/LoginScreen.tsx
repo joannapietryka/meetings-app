@@ -24,13 +24,24 @@ export function LoginScreen() {
 
   return (
     <div
-      className="h-screen max-h-screen w-full flex items-center justify-center p-4 overflow-hidden"
-      style={{
-        backgroundImage: "url('/images/bg-green-gradient.jpg')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}
+    className=" 
+          h-screen
+          min-h-screen 
+          w-full
+          items-center 
+          justify-center 
+          p-4 
+          overflow-hidden
+          flex 
+          flex-col 
+          before:content-[''] 
+          before:absolute 
+          before:inset-0 
+          before:bg-[url('/images/rose-bg.jpg')] 
+          before:bg-cover 
+          before:bg-center 
+          before:opacity-50 
+          before:z-[-1]"
     >
       <div
         className="absolute inset-0"

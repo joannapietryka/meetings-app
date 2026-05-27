@@ -2,6 +2,22 @@ import { i } from "@instantdb/react"
 
 export default i.schema({
   entities: {
+    allowedUsers: i.entity({
+      email: i.string(),
+      createdAt: i.string(),
+    }),
+    blockedDates: i.entity({
+      date: i.string(),           // "YYYY-MM-DD"
+      reason: i.string().optional(),
+    }),
+    blockedSlots: i.entity({
+      date: i.string(),           // "YYYY-MM-DD"
+      time: i.string(),           // "HH:MM" — single slot blocked on that specific date
+    }),
+    scheduleSlots: i.entity({
+      day: i.number(),    // 1=Mon … 5=Fri (matches Date.getDay())
+      slots: i.string(),  // JSON-serialised string[] of "HH:MM" times
+    }),
     meetings: i.entity({
       id: i.string(),
       title: i.string(),

@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { GripVertical, X, Clock } from "lucide-react"
 import type { Task } from "@/lib/calendar-types"
-import { CATEGORY_COLORS } from "@/lib/calendar-types"
+import { CATEGORY_COLORS, FALLBACK_CATEGORY_COLORS } from "@/lib/calendar-types"
 
 interface TaskCardProps {
   task: Task
@@ -16,7 +16,7 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false, onClickTask }: TaskCardProps) {
-  const colors = CATEGORY_COLORS[task.category]
+  const colors = CATEGORY_COLORS[task.category] ?? FALLBACK_CATEGORY_COLORS
   const status = (task as any).status as string | undefined
   const isPastDay = (() => {
     try {
@@ -107,7 +107,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
       {status === "not_confirmed" && !isPastDay && (
         <div className="absolute right-2 bottom-0.5 flex items-center gap-1 pointer-events-none">
           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "rgba(239, 68, 68, 1)" }} />
-          <span className="text-[9px] font-bold text-red-600 font-sans leading-none">NC</span>
+          <span className="text-[9px] font-bold text-red-600 font-sans leading-none">niedostępny</span>
         </div>
       )}
 
