@@ -37,7 +37,7 @@ function useIsAllowedGuest(): { allowed: boolean; loading: boolean } {
 function AccessDenied() {
   return (
     <div
-      className="relative min-h-screen flex flex-col items-center justify-center before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/rose-bg.jpg')] before:bg-cover before:bg-center before:opacity-50 before:z-[-1]"
+      className="relative min-h-screen flex flex-col items-center justify-center before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/rose-bg.jpg')] before:bg-cover before:bg-center before:opacity-80 before:z-[-1]"
     >
       <div
         className="relative z-10 w-full max-w-sm rounded-2xl p-8 text-center shadow-2xl"

@@ -775,7 +775,7 @@ export function GuestDashboard() {
   before:bg-[url('/images/blue-bg.jpg')] 
   before:bg-cover 
   before:bg-center 
-  before:opacity-70 
+  before:opacity-80 
   before:z-[-1]"
     >
       <header className="relative z-10 px-4 pt-4 pb-3 sm:px-6 sm:pt-6 sm:pb-4 flex-shrink-0">
@@ -1076,11 +1076,11 @@ export function GuestDashboard() {
                               <span className="text-[12px] font-sans font-semibold">{mineOnDay.time}</span>
                             </div>
                           )}
-                          {isPast && (
+                          {/* {isPast && (
                             <span className="mt-2 text-[9px] sm:text-[10px] leading-tight text-slate-500 font-sans">
                               termin minął
                             </span>
-                          )}
+                          )} */}
                         </div>
                       )}
 

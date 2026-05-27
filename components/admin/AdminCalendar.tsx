@@ -500,7 +500,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             </div>
             <div>
               <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Planer wizyt</h1>
-              <p className="text-slate-700 text-xs font-sans">{weekLabel}</p>
+              <p className="text-slate-800 text-xs font-sans">{weekLabel}</p>
             </div>
           </div>
 
@@ -518,7 +518,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             </button>
             <button
               onClick={() => setWeekStart(currentWeekStart)}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans text-slate-700 transition-all duration-200 hover:bg-white/40"
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans text-slate-800 transition-all duration-200 hover:bg-white/40"
               style={{ border: "1px solid rgba(0,0,0,0.1)" }}
             >
               Dzisiaj
@@ -583,7 +583,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             />
             <span className="text-slate-800 text-[11px] font-sans">Termin niedostępny</span>
           </div>
-          <span className="ml-auto flex items-center gap-2 text-slate-600 text-[11px] font-sans">
+          <span className="ml-auto flex items-center gap-2 text-slate-800 text-[11px] font-sans">
             <span>Przeciągaj spotkania między dniami · Kliknij slot, aby dodać</span>
             <span className="flex items-center gap-1">
               <Ban className="w-3 h-3" />
@@ -692,7 +692,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold font-sans text-slate-700 transition-all duration-200 hover:bg-white/50 hover:-translate-y-0.5 active:translate-y-0"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold font-sans text-slate-800 transition-all duration-200 hover:bg-white/50 hover:-translate-y-0.5 active:translate-y-0"
             style={{
               background: "rgba(255,255,255,0.35)",
               backdropFilter: "blur(12px)",

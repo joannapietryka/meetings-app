@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { eachDayOfInterval, format, parseISO } from "date-fns"
 import { ChevronLeft, Plus, X, CalendarDays, Users, Ban } from "lucide-react"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
@@ -151,21 +152,47 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   }
 
   // --- Blocked dates ---
-  const [newBlockedDate, setNewBlockedDate] = useState("")
+  const [newBlockedDateFrom, setNewBlockedDateFrom] = useState("")
+  const [newBlockedDateTo, setNewBlockedDateTo] = useState("")
   const [newBlockedReason, setNewBlockedReason] = useState("")
+  const [blockedDateError, setBlockedDateError] = useState("")
+
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   const addBlockedDate = () => {
-    const date = newBlockedDate.trim()
-    if (!date) return
-    if (blockedDates.some((b) => b.date === date)) return
+    const from = newBlockedDateFrom.trim()
+    if (!from) return
+    const to = newBlockedDateTo.trim() || from
+    if (to < from) {
+      setBlockedDateError("Data końcowa musi być taka sama lub późniejsza niż początkowa")
+      return
+    }
+
+    const datesInRange = eachDayOfInterval({
+      start: parseISO(from),
+      end: parseISO(to),
+    }).map((d) => format(d, "yyyy-MM-dd"))
+
+    const existing = new Set(blockedDates.map((b) => b.date))
+    const toCreate = datesInRange.filter((d) => !existing.has(d))
+    if (toCreate.length === 0) {
+      setBlockedDateError("Wybrane dni są już zablokowane")
+      return
+    }
+
+    const reason = newBlockedReason.trim()
     db.transact(
-      (db.tx.blockedDates as any)[id()].create({
-        date,
-        ...(newBlockedReason.trim() ? { reason: newBlockedReason.trim() } : {}),
-      }),
+      toCreate.map((date) =>
+        (db.tx.blockedDates as any)[id()].create({
+          date,
+          ...(reason ? { reason } : {}),
+        }),
+      ),
     )
-    setNewBlockedDate("")
+    setNewBlockedDateFrom("")
+    setNewBlockedDateTo("")
     setNewBlockedReason("")
+    setBlockedDateError("")
   }
 
   const removeBlockedDate = (recordId: string) => {
@@ -195,7 +222,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/rose-bg.jpg')] before:bg-cover before:bg-center before:opacity-50 before:z-[-1]">
+    <div className="relative min-h-screen flex flex-col before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/rose-bg.jpeg')] before:bg-cover before:bg-center before:opacity-80 before:z-[-1]">
       {/* Header */}
       <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
         <div
@@ -222,7 +249,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">
                 Ustawienia administracyjne
               </h1>
-              <p className="text-slate-500 text-xs font-sans">Harmonogram i uprawnieni użytkownicy</p>
+              <p className="text-slate-800 text-xs font-sans">Harmonogram i uprawnieni użytkownicy</p>
             </div>
           </div>
 
@@ -246,7 +273,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <Users className="w-4 h-4 text-slate-600" />
               <h2 className="text-slate-800 font-bold font-sans">Uprawnieni użytkownicy</h2>
             </div>
-            <p className="text-slate-500 text-xs font-sans mb-4 leading-relaxed">
+            <p className="text-slate-800 text-xs font-sans mb-4 leading-relaxed">
               Tylko te adresy e-mail mogą rezerwować wizyty.
             </p>
 
@@ -296,7 +323,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                       <span className="text-slate-700 text-sm font-sans truncate">{u.email}</span>
                       <button
                         onClick={() => removeUser(u.id)}
-                        className="ml-2 flex-shrink-0 p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        className="ml-2 flex-shrink-0 p-1 rounded-lg text-slate-800 hover:text-red-500 hover:bg-red-50 transition-colors"
                         aria-label={`Usuń ${u.email}`}
                       >
                         <X className="w-3.5 h-3.5" />
@@ -313,7 +340,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <CalendarDays className="w-4 h-4 text-slate-600" />
               <h2 className="text-slate-800 font-bold font-sans">Harmonogram wizyt</h2>
             </div>
-            <p className="text-slate-500 text-xs font-sans mb-4 leading-relaxed">
+            <p className="text-slate-800 text-xs font-sans mb-4 leading-relaxed">
               Godziny dostępnych terminów dla każdego dnia tygodnia.
             </p>
 
@@ -322,14 +349,14 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 const slots = getSlotsForDay(day)
                 return (
                   <div key={day}>
-                    <p className="text-slate-600 text-xs font-bold font-sans uppercase tracking-wider mb-2">
+                    <p className="text-slate-800 text-xs font-bold font-sans uppercase tracking-wider mb-2">
                       {label}
                     </p>
 
                     {/* Existing slots */}
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {slots.length === 0 && (
-                        <span className="text-slate-400 text-xs font-sans italic">brak terminów</span>
+                        <span className="text-slate-800 text-xs font-sans italic">brak terminów</span>
                       )}
                       {slots.map((t) => (
                         <span
@@ -386,7 +413,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <Ban className="w-4 h-4 text-amber-500" />
               <h2 className="text-slate-800 font-bold font-sans">Blokady godzin</h2>
             </div>
-            <p className="text-slate-500 text-xs font-sans mb-4 leading-relaxed">
+            <p className="text-slate-800 text-xs font-sans mb-4 leading-relaxed">
               Zablokuj wybrane godziny w konkretnym dniu. Pozostałe terminy w tym dniu pozostają dostępne.
             </p>
 
@@ -400,14 +427,14 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 style={{ ...inputStyle, width: 160 }}
               />
               {!slotBlockDate && (
-                <span className="text-slate-400 text-xs font-sans italic">
+                <span className="text-slate-800 text-xs font-sans italic">
                   Wybierz datę, aby zobaczyć dostępne godziny
                 </span>
               )}
             </div>
 
             {slotBlockDate && slotsForBlockDate.length === 0 && (
-              <p className="text-slate-400 text-xs font-sans italic py-2">
+              <p className="text-slate-800 text-xs font-sans italic py-2">
                 Brak skonfigurowanych godzin dla tego dnia tygodnia.
               </p>
             )}
@@ -454,7 +481,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
             {/* Summary of all blocked slots */}
             {blockedSlotRecords.length > 0 && (
               <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(0,0,0,0.07)" }}>
-                <p className="text-slate-500 text-xs font-semibold font-sans uppercase tracking-wide mb-2">
+                <p className="text-slate-800 text-xs font-semibold font-sans uppercase tracking-wide mb-2">
                   Wszystkie zablokowane godziny
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -489,35 +516,59 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
           {/* ── Blocked dates ──────────────────────────────── */}
           <section className="rounded-2xl p-5 xl:col-span-2" style={glassCard}>
             <div className="flex items-center gap-2 mb-4">
-              <Ban className="w-4 h-4 text-rose-500" />
+              <Ban className="w-4 h-4 text-rose-800" />
               <h2 className="text-slate-800 font-bold font-sans">Blokady dni</h2>
             </div>
-            <p className="text-slate-500 text-xs font-sans mb-4 leading-relaxed">
-              Zablokuj konkretne daty (urlop, święta, niedyspozycja). Goście nie będą mogli rezerwować wizyt w tych dniach. Istniejące wizyty nie są usuwane.
+            <p className="text-slate-800 text-xs font-sans mb-4 leading-relaxed">
+              Zablokuj jeden dzień lub zakres dat (urlop, święta, niedyspozycja). Goście nie będą mogli rezerwować wizyt w tych dniach. Istniejące wizyty nie są usuwane.
             </p>
 
             {/* Add form */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              <input
-                type="date"
-                value={newBlockedDate}
-                onChange={(e) => setNewBlockedDate(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
-                className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
-                style={{ ...inputStyle, width: 160 }}
-              />
+            <div className="flex flex-wrap items-end gap-2 mb-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-800 text-[10px] font-semibold font-sans uppercase tracking-wide">
+                  Od
+                </span>
+                <input
+                  type="date"
+                  value={newBlockedDateFrom}
+                  onChange={(e) => {
+                    setNewBlockedDateFrom(e.target.value)
+                    setBlockedDateError("")
+                  }}
+                  min={todayStr}
+                  className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
+                  style={{ ...inputStyle, width: 160 }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-800 text-[10px] font-semibold font-sans uppercase tracking-wide">
+                  Do (opcjonalnie)
+                </span>
+                <input
+                  type="date"
+                  value={newBlockedDateTo}
+                  onChange={(e) => {
+                    setNewBlockedDateTo(e.target.value)
+                    setBlockedDateError("")
+                  }}
+                  min={newBlockedDateFrom || todayStr}
+                  className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
+                  style={{ ...inputStyle, width: 160 }}
+                />
+              </label>
               <input
                 type="text"
                 value={newBlockedReason}
                 onChange={(e) => setNewBlockedReason(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addBlockedDate()}
                 placeholder="Powód (opcjonalnie)"
-                className="flex-1 min-w-[160px] rounded-xl px-3 py-2 text-sm font-sans placeholder:text-slate-400 transition-colors"
+                className="flex-1 min-w-[160px] rounded-xl px-3 py-2 text-sm font-sans placeholder:text-slate-600 transition-colors"
                 style={inputStyle}
               />
               <button
                 onClick={addBlockedDate}
-                disabled={!newBlockedDate}
+                disabled={!newBlockedDateFrom}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all hover:-translate-y-0.5 disabled:opacity-40 disabled:hover:translate-y-0 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "#0C115B", border: "1px solid rgba(12,17,91,0.6)" }}
               >
@@ -525,10 +576,16 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 Zablokuj
               </button>
             </div>
+            <p className="text-slate-800 text-xs font-sans mb-2">
+              Puste pole „Do” — blokada jednego dnia. Wypełnione oba pola — blokada całego zakresu (włącznie).
+            </p>
+            {blockedDateError && (
+              <p className="text-red-500 text-xs font-sans mb-2">{blockedDateError}</p>
+            )}
 
             {/* Blocked date list */}
             {blockedDates.length === 0 ? (
-              <p className="text-slate-400 text-xs font-sans italic py-3 text-center">
+              <p className="text-slate-800 text-xs font-sans italic py-3 text-center">
                 Brak zablokowanych dni
               </p>
             ) : (
@@ -546,7 +603,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                       }}
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <Ban className="w-3 h-3 text-rose-400 flex-shrink-0" />
+                        <Ban className="w-3 h-3 text-rose-800 flex-shrink-0" />
                         <span className="text-slate-700 text-sm font-semibold font-sans">
                           {formatDate(b.date)}
                         </span>
@@ -558,7 +615,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                       </div>
                       <button
                         onClick={() => removeBlockedDate(b.id)}
-                        className="ml-2 flex-shrink-0 p-1 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-100 transition-colors"
+                        className="ml-2 flex-shrink-0 p-1 rounded-lg text-rose-800 hover:text-rose-600 hover:bg-rose-100 transition-colors"
                         aria-label={`Odblokuj ${b.date}`}
                       >
                         <X className="w-3.5 h-3.5" />
