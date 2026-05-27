@@ -21,7 +21,7 @@ export default function PolitykaPrywatnosci() {
         before:bg-[url('/images/rose-bg.jpg')]
         before:bg-cover
         before:bg-center
-        before:opacity-50
+        before:opacity-80
         before:z-[-1]
         relative"
     >

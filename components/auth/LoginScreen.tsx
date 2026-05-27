@@ -161,7 +161,7 @@ export function LoginScreen() {
         before:bg-[url('/images/rose-bg.jpg')]
         before:bg-cover
         before:bg-center
-        before:opacity-50
+        before:opacity-80
         before:z-[-1]"
     >
       <div
