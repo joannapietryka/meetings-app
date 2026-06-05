@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { addDays, addHours, addMonths, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
+import { pl } from "date-fns/locale"
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban, Settings } from "lucide-react"
 import type { TaskCategory } from "@/lib/calendar-types"
 import {
@@ -10,12 +11,17 @@ import {
   SESSION_DURATION,
   PX_PER_MINUTE,
   GRID_TOTAL_HEIGHT,
-  DAY_SLOTS,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
 } from "@/lib/calendar-types"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
+import { resolveSlotsForDate, type ScheduleSlotRecord } from "@/lib/schedule-slots"
+import {
+  resolveInCabinetWeekdaysForDate,
+  type InCabinetDayRecord,
+} from "@/lib/in-cabinet-days"
+import { getCategoryForDate } from "@/lib/visit-category"
 import { DayColumn } from "@/components/calendar/DayColumn"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
@@ -97,20 +103,20 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     return map
   }, [blockedSlotsData])
 
-  // Dynamic schedule: read from DB, fall back per-day to hardcoded constants
   const { data: scheduleData } = db.useQuery({ scheduleSlots: {} })
-  const dynamicDaySlots = useMemo<Record<number, string[]>>(() => {
-    const records = (scheduleData?.scheduleSlots ?? []) as unknown as { day: number; slots: string }[]
-    // Start with hardcoded defaults for every day, then override with DB values where present
-    const map: Record<number, string[]> = { ...DAY_SLOTS }
-    for (const r of records) {
-      try { map[r.day] = JSON.parse(r.slots) } catch {}
-    }
-    return map
-  }, [scheduleData])
+  const scheduleSlotRecords = useMemo(
+    () => (scheduleData?.scheduleSlots ?? []) as ScheduleSlotRecord[],
+    [scheduleData],
+  )
+
+  const { data: bookingSettingsData } = db.useQuery({ bookingSettings: {} })
+  const inCabinetDayRecords = useMemo(
+    () => (bookingSettingsData?.bookingSettings ?? []) as InCabinetDayRecord[],
+    [bookingSettingsData],
+  )
 
   const weekEndDate = addDays(weekStart, 6)
-  const weekLabel = `${format(weekStart, "MMM d")} – ${format(weekEndDate, "MMM d, yyyy")}`
+  const weekLabel = `${format(weekStart, "d MMM", { locale: pl })} – ${format(weekEndDate, "d MMM yyyy", { locale: pl })}`
 
   const canGoPrev = isAfter(weekStart, minWeekStart) || toDateStr(weekStart) !== toDateStr(minWeekStart)
   const canGoNext = isBefore(weekStart, maxWeekStart)
@@ -158,8 +164,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
 
   const canBookSlotForDay = (dayDate: Date) => (time: string) => {
     if (!isSlotBookable(dayDate, time)) return false
-    // Only allow the configured psychologist slots for this weekday
-    const daySlots = dynamicDaySlots[dayDate.getDay()] ?? []
+    const daySlots = resolveSlotsForDate(toDateStr(dayDate), scheduleSlotRecords)
     if (!daySlots.includes(time)) return false
     if (!draggingId.current) return true
     const dateStr = toDateStr(dayDate)
@@ -172,8 +177,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       !isAfter(startOfDay(d), maxBookingDate);
       d = addDays(d, 1)
     ) {
-      const daySlots = dynamicDaySlots[d.getDay()] ?? []
       const dateStr = toDateStr(d)
+      const daySlots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
       for (const time of daySlots) {
         if (!isSlotBookable(d, time)) continue
         if (doesConflict(dateStr, time, "")) continue
@@ -204,8 +209,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     const minutesFromStart = relativeY / PX_PER_MINUTE
     const absoluteMinutes = CALENDAR_START_HOUR * 60 + minutesFromStart
 
-    const targetDateObj = parseISO(targetDate)
-    const targetDaySlots = dynamicDaySlots[targetDateObj.getDay()] ?? []
+    const targetDaySlots = resolveSlotsForDate(targetDate, scheduleSlotRecords)
 
     if (targetDaySlots.length === 0) {
       draggingId.current = null
@@ -224,7 +228,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       }
     }
 
-    if (!isSlotBookable(targetDateObj, newTime)) {
+    if (!isSlotBookable(parseISO(targetDate), newTime)) {
       draggingId.current = null
       return
     }
@@ -333,6 +337,15 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     duration?: number
     email?: string
   }) => {
+    const expectedCategory = getCategoryForDate(
+      payload.date,
+      resolveInCabinetWeekdaysForDate(payload.date, inCabinetDayRecords),
+    )
+    if (payload.category !== expectedCategory) {
+      alert("Typ wizyty nie odpowiada wybranemu dniu. Wybierz inną datę lub odśwież stronę.")
+      return false
+    }
+
     if (editing) {
       const nowIso = new Date().toISOString()
       const dateTimeChanged = editing.date !== payload.date || (editing.time ?? "") !== (payload.time ?? "")
@@ -477,9 +490,9 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 before:opacity-80 
                 before:z-[-1]"
               >
-      <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
+      <header className="relative z-10 px-3 pt-4 pb-3 sm:px-6 sm:pt-6 sm:pb-4 flex-shrink-0">
         <div
-          className="max-w-full mx-auto rounded-2xl px-5 py-3.5 flex items-center justify-between"
+          className="max-w-full mx-auto rounded-2xl px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           style={{
             background: "rgba(255,255,255,0.28)",
             backdropFilter: "blur(30px) saturate(180%)",
@@ -487,9 +500,9 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             boxShadow: "0 8px 32px rgba(0,0,0,0.08), inset 0 2px 0 rgba(255,255,255,0.6)",
           }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <div
-              className="p-2 rounded-xl"
+              className="p-2 rounded-xl shrink-0"
               style={{
                 background: "rgba(12,17,91,0.7)",
                 border: "1px solid rgba(12,17,91,0.5)",
@@ -498,13 +511,14 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             >
               <CalendarDays className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Planer wizyt</h1>
-              <p className="text-slate-800 text-xs font-sans">{weekLabel}</p>
+            <div className="min-w-0">
+              <h1 className="text-slate-800 font-bold text-base sm:text-lg font-sans leading-tight">Planer wizyt</h1>
+              <p className="text-slate-800 text-[11px] sm:text-xs font-sans truncate">{weekLabel}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center justify-center sm:justify-start gap-2">
             <button
               onClick={() => {
                 if (canGoPrev) setWeekStart((w) => subWeeks(w, 1))
@@ -534,6 +548,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             >
               <ChevronRight className="w-4 h-4 text-slate-700" />
             </button>
+            </div>
             <button
               onClick={() => {
                 const next = findNextAvailableSlot()
@@ -543,7 +558,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                   setModalConfig({ date: toDateStr(addDays(weekStart, 0)) })
                 }
               }}
-              className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold font-sans text-sm text-white transition-all duration-200 hover:-translate-y-0.5"
+              className="w-full sm:w-auto sm:ml-1 flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl font-semibold font-sans text-sm text-white transition-all duration-200 hover:-translate-y-0.5"
               style={{
                 backgroundColor: "#0C115B",
                 boxShadow: "0 4px 16px rgba(12,17,91,0.35), inset 0 1px 0 rgba(255,255,255,0.2)",
@@ -557,8 +572,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 px-6 pb-4 overflow-auto">
-        <div className="flex items-center gap-5 mb-3 px-1">
+      <main className="relative z-10 flex-1 px-3 pb-4 overflow-x-hidden overflow-y-auto sm:px-6">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-5 mb-2 sm:mb-3 px-0.5 sm:px-1">
           {(Object.keys(CATEGORY_LABELS) as TaskCategory[]).map((cat) => {
             const label = CATEGORY_LABELS[cat]
             const colors = CATEGORY_COLORS[cat]
@@ -583,20 +598,23 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             />
             <span className="text-slate-800 text-[11px] font-sans">Termin niedostępny</span>
           </div>
-          <span className="ml-auto flex items-center gap-2 text-slate-800 text-[11px] font-sans">
+          <span className="hidden lg:flex ml-auto items-center gap-2 text-slate-800 text-[11px] font-sans">
             <span>Przeciągaj spotkania między dniami · Kliknij slot, aby dodać</span>
             <span className="flex items-center gap-1">
               <Ban className="w-3 h-3" />
               <span>Pola zajęte są wyłączone</span>
             </span>
           </span>
+          <p className="w-full sm:w-auto sm:ml-auto text-slate-600 text-[10px] font-sans leading-snug lg:hidden">
+            Kliknij wolny slot, aby dodać wizytę.
+          </p>
         </div>
 
-        <div className="flex gap-0">
+        <div className="overflow-x-auto sm:overflow-visible -mx-1 sm:mx-0 pb-1 sm:pb-0">
+        <div className="flex gap-0 min-w-[520px] sm:min-w-0">
           {/* Drag-left zone to go to previous week */}
           <div
-            className="flex-shrink-0 pt-[52px]"
-            style={{ width: 16 }}
+            className="hidden sm:block flex-shrink-0 pt-[52px] w-4"
             onDragEnter={(e) => {
               e.preventDefault()
               if (canGoPrev) {
@@ -605,7 +623,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             }}
           />
 
-          <div className="flex-shrink-0 pr-2 pt-[52px]" style={{ width: 50 }}>
+          <div className="flex-shrink-0 pr-1 sm:pr-2 pt-[44px] sm:pt-[52px] w-9 sm:w-[50px]">
             <div className="relative" style={{ height: GRID_TOTAL_HEIGHT }}>
               {Array.from(
                 { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
@@ -616,7 +634,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                   className="absolute right-0 flex justify-end pr-2"
                   style={{ top: (hour - CALENDAR_START_HOUR) * 60 * PX_PER_MINUTE }}
                 >
-                  <span className="text-slate-800 text-[10px] font-sans -translate-y-1.5 leading-none tabular-nums">
+                  <span className="text-slate-800 text-[9px] sm:text-[10px] font-sans -translate-y-1.5 leading-none tabular-nums">
                     {hour}:00
                   </span>
                 </div>
@@ -624,7 +642,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             </div>
           </div>
 
-          <div className="flex gap-2 flex-1 min-w-0">
+          <div className="flex gap-1 sm:gap-2 flex-1 min-w-0">
             {[0, 1, 2, 3, 4, 5, 6].map((dayOffset) => {
               const dayDate = addDays(weekStart, dayOffset)
               const dateStr = toDateStr(dayDate)
@@ -633,7 +651,14 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               const isAfterBookingWindow = isAfter(startOfDay(dayDate), maxBookingDate)
               const isLocked = isBeforeToday || isAfterBookingWindow
               return (
-                <div key={dayOffset} style={{ flex: isWeekend ? "0 0 36px" : "1 1 0" }}>
+                <div
+                  key={dayOffset}
+                  className={
+                    isWeekend
+                      ? "flex-[0_0_16px] sm:flex-[0_0_36px]"
+                      : "flex-1 min-w-[72px] sm:min-w-0"
+                  }
+                >
                   <DayColumn
                     date={dayDate}
                     dateStr={dateStr}
@@ -642,7 +667,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                     isLocked={isLocked}
                     isBlocked={blockedDateSet.has(dateStr)}
                     blockedTimes={blockedSlotMap.get(dateStr)}
-                    scheduledSlots={dynamicDaySlots[dayDate.getDay()] ?? []}
+                    scheduledSlots={resolveSlotsForDate(dateStr, scheduleSlotRecords)}
                     canBookSlot={canBookSlotForDay(dayDate)}
                     onDragStart={handleDragStart}
                     onDrop={handleDrop}
@@ -665,6 +690,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             })}
           </div>
         </div>
+        </div>
       </main>
 
       {modalConfig !== null && (
@@ -672,13 +698,15 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           defaultDate={modalConfig.date}
           defaultTime={modalConfig.time}
           existingTasks={meetings as any}
-          daySlots={dynamicDaySlots}
+          scheduleRecords={scheduleSlotRecords}
           initialTitle={editing?.title}
           initialDescription={editing?.description}
           initialCategory={editing?.category}
           editingTaskId={editing?.id}
           initialEmail={editing?.userEmail}
           showEmailField
+          autoCategoryFromDate
+          inCabinetDayRecords={inCabinetDayRecords}
           onClose={() => {
             setModalConfig(null)
             setEditing(null)
@@ -688,11 +716,11 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       )}
 
       {/* Bottom bar */}
-      <footer className="px-6 pb-6 flex items-center justify-end gap-2">
+      <footer className="px-3 sm:px-6 pb-4 sm:pb-6 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold font-sans text-slate-800 transition-all duration-200 hover:bg-white/50 hover:-translate-y-0.5 active:translate-y-0"
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl text-sm font-semibold font-sans text-slate-800 transition-all duration-200 hover:bg-white/50 hover:-translate-y-0.5 active:translate-y-0"
             style={{
               background: "rgba(255,255,255,0.35)",
               backdropFilter: "blur(12px)",
@@ -711,7 +739,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               alert(err?.body?.message ?? err?.message ?? "Could not sign out.")
             })
           }}
-          className="px-4 py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+          className="w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
           style={{
             backgroundColor: "#0C115B",
             boxShadow: "0 4px 16px rgba(12,17,91,0.35), inset 0 1px 0 rgba(255,255,255,0.2)",

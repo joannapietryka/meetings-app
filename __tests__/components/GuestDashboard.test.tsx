@@ -70,6 +70,9 @@ function mockMeetings(
     if ("scheduleSlots" in q) {
       return { isLoading: false, error: null, data: { scheduleSlots: [] } }
     }
+    if ("bookingSettings" in q) {
+      return { isLoading: false, error: null, data: { bookingSettings: [] } }
+    }
     return { isLoading: false, error: null, data: {} }
   })
 }
@@ -438,6 +441,9 @@ describe("GuestDashboard", () => {
           },
         }
       }
+      if ("bookingSettings" in q) {
+        return { isLoading: false, error: null, data: { bookingSettings: [] } }
+      }
       return { isLoading: false, error: null, data: {} }
     })
 
@@ -446,5 +452,58 @@ describe("GuestDashboard", () => {
     await waitFor(() => {
       expect(screen.getByTestId("calendar-day-2026-03-18")).toHaveTextContent(/brak wolnych terminów/i)
     })
+  })
+
+  it("applies versioned schedule only from effectiveFrom onward", async () => {
+    jest.setSystemTime(new Date("2026-05-27T12:00:00"))
+
+    mockFetchWithAvailability([])
+    ;(db.useUser as jest.Mock).mockReturnValue(mockUser)
+    ;(db.useQuery as jest.Mock).mockImplementation((q: Record<string, unknown>) => {
+      if ("meetings" in q) {
+        return { isLoading: false, error: null, data: { meetings: [] } }
+      }
+      if ("blockedDates" in q) {
+        return { isLoading: false, error: null, data: { blockedDates: [] } }
+      }
+      if ("blockedSlots" in q) {
+        return { isLoading: false, error: null, data: { blockedSlots: [] } }
+      }
+      if ("scheduleSlots" in q) {
+        return {
+          isLoading: false,
+          error: null,
+          data: {
+            scheduleSlots: [
+              { day: 3, slots: JSON.stringify(["14:00", "15:00", "16:15"]) },
+              {
+                day: 3,
+                slots: JSON.stringify(["19:15"]),
+                effectiveFrom: "2026-06-01",
+              },
+            ],
+          },
+        }
+      }
+      if ("bookingSettings" in q) {
+        return { isLoading: false, error: null, data: { bookingSettings: [] } }
+      }
+      return { isLoading: false, error: null, data: {} }
+    })
+
+    jest.setSystemTime(new Date("2026-05-27T12:00:00"))
+    render(<GuestDashboard />)
+
+    await waitFor(() => {
+      expect(screen.queryByText(/sprawdzam zajęte terminy/i)).not.toBeInTheDocument()
+    })
+
+    const mayWednesday = screen.getByTestId("calendar-day-2026-05-27")
+    expect(mayWednesday).not.toHaveTextContent(/brak wolnych terminów/i)
+
+    await user.click(screen.getByRole("button", { name: /następny miesiąc/i }))
+
+    const juneWednesday = await screen.findByTestId("calendar-day-2026-06-03")
+    expect(juneWednesday).not.toHaveTextContent(/brak wolnych terminów/i)
   })
 })

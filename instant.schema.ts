@@ -15,8 +15,14 @@ export default i.schema({
       time: i.string(),           // "HH:MM" — single slot blocked on that specific date
     }),
     scheduleSlots: i.entity({
-      day: i.number(),    // 1=Mon … 5=Fri (matches Date.getDay())
-      slots: i.string(),  // JSON-serialised string[] of "HH:MM" times
+      day: i.number(),           // 1=Mon … 5=Fri (matches Date.getDay())
+      slots: i.string(),         // JSON-serialised string[] of "HH:MM" times
+      effectiveFrom: i.string().optional(), // "YYYY-MM-DD" — first date this version applies
+    }),
+    bookingSettings: i.entity({
+      inCabinetWeekdays: i.string().optional(), // JSON number[] — weekdays with in-cabinet visits (1=Mon … 5=Fri)
+      effectiveFrom: i.string().optional(), // "YYYY-MM-DD" — first date this version applies
+      inCabinetWeekday: i.number().optional(), // legacy single weekday (pre-versioning)
     }),
     otpSessions: i.entity({
       email: i.string(),
@@ -25,7 +31,6 @@ export default i.schema({
       attempts: i.number(),     // max 5 before lockout
     }),
     meetings: i.entity({
-      id: i.string(),
       title: i.string(),
       description: i.string().optional(),
       category: i.string(),

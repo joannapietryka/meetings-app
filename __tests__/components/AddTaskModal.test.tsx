@@ -4,7 +4,7 @@
  */
 
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, within, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 import type { Task } from "@/lib/calendar-types"
@@ -52,6 +52,7 @@ function renderModal(overrides: Partial<AddTaskModalProps> = {}) {
 describe("AddTaskModal", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    jest.useRealTimers()
   })
 
   describe("title and mode", () => {
@@ -142,6 +143,51 @@ describe("AddTaskModal", () => {
   })
 
   describe("time options", () => {
+    it("resolves slots per date from versioned scheduleRecords", () => {
+      renderModal({
+        defaultDate: "2026-05-27",
+        scheduleRecords: [
+          { day: 3, slots: JSON.stringify(["14:00", "15:00"]) },
+          { day: 3, slots: JSON.stringify(["19:15"]), effectiveFrom: "2026-06-01" },
+        ],
+        maxBookableDate: new Date("2026-06-26"),
+      })
+
+      const comboboxes = screen.getAllByRole("combobox")
+      const timeSelect = comboboxes[1] as HTMLSelectElement
+      expect(within(timeSelect).getByRole("option", { name: "14:00" })).toBeInTheDocument()
+
+      const dateSelect = comboboxes[0] as HTMLSelectElement
+      expect(
+        within(dateSelect).getByRole("option", { name: "śr., 3 cze" }),
+      ).toBeInTheDocument()
+    })
+
+    it("auto-sets visit type from date for guest booking", () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date("2026-06-01T12:00:00"))
+
+      try {
+        renderModal({
+          defaultDate: "2026-06-03",
+          autoCategoryFromDate: true,
+          inCabinetDayRecords: [{ inCabinetWeekdays: "[3]", effectiveFrom: "2000-01-01" }],
+          maxBookableDate: new Date("2026-06-26"),
+        })
+
+        expect(screen.getByText("W gabinecie")).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: /online/i })).not.toBeInTheDocument()
+
+        const dateSelect = screen.getAllByRole("combobox")[0] as HTMLSelectElement
+        fireEvent.change(dateSelect, { target: { value: "2026-06-04" } })
+
+        expect(screen.getByText("Online")).toBeInTheDocument()
+        expect(screen.queryByText("W gabinecie")).not.toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
     it("marks booked slots as unavailable in the time dropdown", () => {
       const dayOfWeek = new Date(TEST_DATE).getDay()
       const daySlots = DAY_SLOTS[dayOfWeek] ?? []

@@ -2,27 +2,32 @@
 
 import { useMemo, useState } from "react"
 import { eachDayOfInterval, format, parseISO } from "date-fns"
+import { pl } from "date-fns/locale"
 import { ChevronLeft, Plus, X, CalendarDays, Users, Ban } from "lucide-react"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
-import { DAY_SLOTS } from "@/lib/calendar-types"
+import {
+  findScheduleVersionId,
+  getNextScheduleEffectiveFrom,
+  resolveSlotsForDate,
+  resolveSlotsForWeekdayAtEffectiveFrom,
+  type ScheduleSlotRecord,
+} from "@/lib/schedule-slots"
+import {
+  findInCabinetDaysVersionId,
+  resolveInCabinetWeekdaysAtEffectiveFrom,
+  type InCabinetDayRecord,
+} from "@/lib/in-cabinet-days"
+import { WORK_WEEKDAYS } from "@/lib/visit-category"
 
 interface AdminSettingsProps {
   onBack: () => void
 }
 
-type SlotRecord = { id: string; day: number; slots: string }
 type UserRecord = { id: string; email: string; createdAt: string }
 type BlockedDateRecord = { id: string; date: string; reason?: string }
 type BlockedSlotRecord = { id: string; date: string; time: string }
-
-const WEEKDAYS: { day: number; label: string }[] = [
-  { day: 1, label: "Poniedziałek" },
-  { day: 2, label: "Wtorek" },
-  { day: 3, label: "Środa" },
-  { day: 4, label: "Czwartek" },
-  { day: 5, label: "Piątek" },
-]
+type BookingSettingsRecord = InCabinetDayRecord & { id: string }
 
 const glassCard: React.CSSProperties = {
   background: "rgba(255,255,255,0.32)",
@@ -36,11 +41,49 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   const { data: usersData } = db.useQuery({ allowedUsers: {} })
   const { data: blockedData } = db.useQuery({ blockedDates: {} })
   const { data: blockedSlotsData } = db.useQuery({ blockedSlots: {} })
+  const { data: bookingSettingsData } = db.useQuery({ bookingSettings: {} })
 
   const slotRecords = useMemo(
-    () => (scheduleData?.scheduleSlots ?? []) as SlotRecord[],
+    () => (scheduleData?.scheduleSlots ?? []) as ScheduleSlotRecord[],
     [scheduleData],
   )
+  const scheduleEditEffectiveFrom = useMemo(() => getNextScheduleEffectiveFrom(), [])
+  const scheduleEditEffectiveLabel = useMemo(
+    () => format(parseISO(scheduleEditEffectiveFrom), "d MMMM yyyy", { locale: pl }),
+    [scheduleEditEffectiveFrom],
+  )
+
+  const inCabinetDayRecords = useMemo(
+    () => (bookingSettingsData?.bookingSettings ?? []) as BookingSettingsRecord[],
+    [bookingSettingsData],
+  )
+  const cabinetEditEffectiveFrom = scheduleEditEffectiveFrom
+  const cabinetEditEffectiveLabel = scheduleEditEffectiveLabel
+
+  const getInCabinetWeekdaysForEdit = (): number[] =>
+    resolveInCabinetWeekdaysAtEffectiveFrom(cabinetEditEffectiveFrom, inCabinetDayRecords)
+
+  const saveInCabinetWeekdays = (weekdays: number[]) => {
+    const existingId = findInCabinetDaysVersionId(cabinetEditEffectiveFrom, inCabinetDayRecords)
+    const payload = {
+      inCabinetWeekdays: JSON.stringify(weekdays.slice().sort()),
+      effectiveFrom: cabinetEditEffectiveFrom,
+    }
+    if (existingId) {
+      db.transact((db.tx.bookingSettings as any)[existingId].update(payload))
+    } else {
+      db.transact((db.tx.bookingSettings as any)[id()].create(payload))
+    }
+  }
+
+  const toggleInCabinetWeekday = (day: number) => {
+    const current = getInCabinetWeekdaysForEdit()
+    if (current.includes(day)) {
+      saveInCabinetWeekdays(current.filter((d) => d !== day))
+    } else {
+      saveInCabinetWeekdays([...current, day])
+    }
+  }
   const allowedUsers = useMemo(
     () => (usersData?.allowedUsers ?? []) as UserRecord[],
     [usersData],
@@ -63,28 +106,21 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
     return map
   }, [blockedSlotRecords])
 
-  // Map day → { id, slots[] }
-  const dbSlotMap = useMemo(() => {
-    const map: Record<number, { id: string; slots: string[] }> = {}
-    for (const r of slotRecords) {
-      try {
-        map[r.day] = { id: r.id, slots: JSON.parse(r.slots) }
-      } catch {}
-    }
-    return map
-  }, [slotRecords])
-
   const getSlotsForDay = (day: number): string[] =>
-    (dbSlotMap[day]?.slots ?? DAY_SLOTS[day] ?? []).slice().sort()
+    resolveSlotsForWeekdayAtEffectiveFrom(day, scheduleEditEffectiveFrom, slotRecords)
 
   // --- Schedule editing ---
   const [newTime, setNewTime] = useState<Record<number, string>>({})
 
   const saveSlots = (day: number, slots: string[]) => {
-    const existing = dbSlotMap[day]
-    const payload = { day, slots: JSON.stringify(slots.slice().sort()) }
-    if (existing) {
-      db.transact((db.tx.scheduleSlots as any)[existing.id].update(payload))
+    const existingId = findScheduleVersionId(day, scheduleEditEffectiveFrom, slotRecords)
+    const payload = {
+      day,
+      slots: JSON.stringify(slots.slice().sort()),
+      effectiveFrom: scheduleEditEffectiveFrom,
+    }
+    if (existingId) {
+      db.transact((db.tx.scheduleSlots as any)[existingId].update(payload))
     } else {
       db.transact((db.tx.scheduleSlots as any)[id()].create(payload))
     }
@@ -137,9 +173,8 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
 
   const slotsForBlockDate = useMemo(() => {
     if (!slotBlockDate) return []
-    const dow = new Date(slotBlockDate + "T12:00:00").getDay()
-    return getSlotsForDay(dow)
-  }, [slotBlockDate, dbSlotMap])
+    return resolveSlotsForDate(slotBlockDate, slotRecords)
+  }, [slotBlockDate, slotRecords])
 
   const toggleBlockedSlot = (date: string, time: string) => {
     const isCurrentlyBlocked = blockedSlotMap.get(date)?.has(time)
@@ -226,7 +261,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
       {/* Header */}
       <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
         <div
-          className="max-w-full mx-auto rounded-2xl px-5 py-3.5 flex items-center justify-between"
+          className="max-w-full mx-auto rounded-2xl px-5 py-3.5 flex flex-col gap-3"
           style={{
             background: "rgba(255,255,255,0.28)",
             backdropFilter: "blur(30px) saturate(180%)",
@@ -255,7 +290,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
 
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold font-sans text-sm text-slate-700 transition-all duration-200 hover:bg-white/50"
+            className="self-start flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold font-sans text-sm text-slate-700 transition-all duration-200 hover:bg-white/50"
             style={{ border: "1px solid rgba(0,0,0,0.1)" }}
           >
             <ChevronLeft className="w-4 h-4" />
@@ -340,12 +375,22 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
               <CalendarDays className="w-4 h-4 text-slate-600" />
               <h2 className="text-slate-800 font-bold font-sans">Harmonogram wizyt</h2>
             </div>
-            <p className="text-slate-800 text-xs font-sans mb-4 leading-relaxed">
+            <p className="text-slate-800 text-xs font-sans mb-2 leading-relaxed">
               Godziny dostępnych terminów dla każdego dnia tygodnia.
+            </p>
+            <p
+              className="text-slate-600 text-xs font-sans mb-4 leading-relaxed rounded-xl px-3 py-2"
+              style={{
+                background: "rgba(255,255,255,0.4)",
+                border: "1px solid rgba(0,0,0,0.06)",
+              }}
+            >
+              Zmiany obowiązują od <strong>{scheduleEditEffectiveLabel}</strong>. Bieżący i
+              wcześniejsze miesiące pozostają bez zmian.
             </p>
 
             <div className="flex flex-col gap-4">
-              {WEEKDAYS.map(({ day, label }) => {
+              {WORK_WEEKDAYS.map(({ day, label }) => {
                 const slots = getSlotsForDay(day)
                 return (
                   <div key={day}>
@@ -404,6 +449,49 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                   </div>
                 )
               })}
+            </div>
+
+            {/* ── In-cabinet weekdays ──────────────────────── */}
+            <div className="mt-6 pt-6 border-t border-white/40">
+              <h3 className="text-slate-800 font-bold font-sans text-sm mb-2">
+                Dni wizyt w gabinecie
+              </h3>
+              <p className="text-slate-600 text-xs font-sans mb-2 leading-relaxed">
+                Wybierz dni tygodnia, w których wizyty odbywają się w gabinecie. Pozostałe dni są
+                online (ustawiane automatycznie przy rezerwacji).
+              </p>
+              <p
+                className="text-slate-600 text-xs font-sans mb-4 leading-relaxed rounded-xl px-3 py-2"
+                style={{
+                  background: "rgba(255,255,255,0.4)",
+                  border: "1px solid rgba(0,0,0,0.06)",
+                }}
+              >
+                Zmiany obowiązują od <strong>{cabinetEditEffectiveLabel}</strong>. Bieżący i
+                wcześniejsze miesiące pozostają bez zmian.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {WORK_WEEKDAYS.map(({ day, label }) => {
+                  const selected = getInCabinetWeekdaysForEdit().includes(day)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleInCabinetWeekday(day)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans transition-colors"
+                      style={{
+                        background: selected ? "rgba(12,17,91,0.12)" : "rgba(255,255,255,0.5)",
+                        border: selected
+                          ? "1px solid rgba(12,17,91,0.35)"
+                          : "1px solid rgba(0,0,0,0.08)",
+                        color: selected ? "#0C115B" : "#475569",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </section>
 
