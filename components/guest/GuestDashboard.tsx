@@ -241,6 +241,7 @@ export function GuestDashboard() {
   const hasAvailabilitySnapshotRef = useRef(Boolean(cachedAvailabilitySnapshot))
 
   useEffect(() => {
+    isMountedRef.current = true
     return () => {
       isMountedRef.current = false
       availabilityAbortRef.current?.abort()
@@ -296,13 +297,16 @@ export function GuestDashboard() {
         return nextMeetings
       } catch (err) {
         const message = getAvailabilityErrorMessage(err)
-        if (isMountedRef.current && availabilityRequestIdRef.current === requestId) {
+        const isStaleRequest = availabilityRequestIdRef.current !== requestId
+        if (isMountedRef.current && !isStaleRequest) {
           console.error("[guest availability]", err)
           setAvailabilityErrorMessage(message)
           if (!hadSnapshot) {
             availabilityMeetingsRef.current = []
             setAvailabilityMeetings([])
             setAvailabilityStatus("error")
+          } else {
+            setAvailabilityStatus("ready")
           }
         }
         if (requireFresh) {
