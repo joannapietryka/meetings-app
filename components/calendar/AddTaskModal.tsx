@@ -20,7 +20,14 @@ import {
   SESSION_DURATION,
   DAY_SLOTS,
   CATEGORY_COLORS,
+  CATEGORY_LABELS,
 } from "@/lib/calendar-types"
+import { resolveSlotsForDate, type ScheduleSlotRecord } from "@/lib/schedule-slots"
+import {
+  resolveInCabinetWeekdaysForDate,
+  type InCabinetDayRecord,
+} from "@/lib/in-cabinet-days"
+import { getCategoryForDate } from "@/lib/visit-category"
 
 interface AddTaskModalProps {
   defaultDate: string
@@ -44,7 +51,9 @@ interface AddTaskModalProps {
   editingTaskId?: string
   showEmailField?: boolean
   initialEmail?: string
-  /** Dynamic schedule from DB — falls back to the hardcoded DAY_SLOTS constant when omitted. */
+  /** Versioned schedule from DB — resolved per date. */
+  scheduleRecords?: ScheduleSlotRecord[]
+  /** @deprecated Use scheduleRecords. Falls back when scheduleRecords is omitted. */
   daySlots?: Record<number, string[]>
   /** Dates the current user is not allowed to book (already has a meeting that day, or weekly cap reached). */
   disabledDates?: Set<string>
@@ -52,6 +61,10 @@ interface AddTaskModalProps {
   adminBlockedSlots?: Map<string, Set<string>>
   /** Last calendar day (inclusive) that can be booked; start-of-day. Defaults to one month from today. */
   maxBookableDate?: Date
+  /** When true, category is set from selected date (guest booking). */
+  autoCategoryFromDate?: boolean
+  /** Versioned in-cabinet weekday settings when autoCategoryFromDate is set. */
+  inCabinetDayRecords?: InCabinetDayRecord[]
 }
 
 const CATEGORIES: { value: TaskCategory; label: string }[] = [
@@ -59,11 +72,7 @@ const CATEGORIES: { value: TaskCategory; label: string }[] = [
   { value: "online",      label: "Online" },
 ]
 
-/** Returns the psychologist slots available for the given date string. */
-function getSlotsForDate(dateStr: string, slots: Record<number, string[]>): string[] {
-  const dayOfWeek = parseISO(dateStr).getDay()
-  return slots[dayOfWeek] ?? []
-}
+type SlotsResolver = (dateStr: string) => string[]
 
 /** True if a 50-min session starting at `time` finishes before the calendar end. */
 function fitsInDay(time: string): boolean {
@@ -74,7 +83,7 @@ function fitsInDay(time: string): boolean {
 
 /** Generate available dates: up to maxDate, weekdays only, that have at least one slot. */
 function generateAvailableDates(
-  slots: Record<number, string[]>,
+  resolveSlots: SlotsResolver,
   maxDate: Date,
 ): { date: Date; dateStr: string; label: string }[] {
   const today = startOfDay(new Date())
@@ -84,7 +93,7 @@ function generateAvailableDates(
   while (!isAfter(current, maxDate)) {
     if (!isWeekend(current)) {
       const dateStr = format(current, "yyyy-MM-dd")
-      if (getSlotsForDate(dateStr, slots).length > 0) {
+      if (resolveSlots(dateStr).length > 0) {
         dates.push({
           date: current,
           dateStr,
@@ -111,12 +120,26 @@ export function AddTaskModal({
   editingTaskId,
   showEmailField,
   initialEmail,
+  scheduleRecords,
   daySlots,
   disabledDates,
   adminBlockedSlots,
   maxBookableDate: maxBookableDateProp,
+  autoCategoryFromDate = false,
+  inCabinetDayRecords,
 }: AddTaskModalProps) {
-  const slots = daySlots ?? DAY_SLOTS
+  const resolveInCabinetWeekdays = useMemo(
+    () => (dateStr: string) =>
+      resolveInCabinetWeekdaysForDate(dateStr, inCabinetDayRecords ?? []),
+    [inCabinetDayRecords],
+  )
+  const resolveSlots = useMemo<SlotsResolver>(() => {
+    if (scheduleRecords) {
+      return (dateStr: string) => resolveSlotsForDate(dateStr, scheduleRecords)
+    }
+    const legacy = daySlots ?? DAY_SLOTS
+    return (dateStr: string) => legacy[parseISO(dateStr).getDay()] ?? []
+  }, [scheduleRecords, daySlots])
   const isEditing = Boolean(editingTaskId)
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(now), [now])
@@ -125,10 +148,10 @@ export function AddTaskModal({
     [today, maxBookableDateProp],
   )
   const availableDates = useMemo(
-    () => generateAvailableDates(slots, maxBookingDate).filter(
+    () => generateAvailableDates(resolveSlots, maxBookingDate).filter(
       (d) => !disabledDates?.has(d.dateStr)
     ),
-    [slots, maxBookingDate, disabledDates],
+    [resolveSlots, maxBookingDate, disabledDates],
   )
 
   const isSlotWithinBookingWindow = (dateStr: string, slot: string) => {
@@ -158,7 +181,11 @@ export function AddTaskModal({
 
   const [title, setTitle] = useState(() => (initialTitle ?? prefillTitle ?? "").trim())
   const [description, setDescription] = useState(initialDescription ?? "")
-  const [category, setCategory] = useState<TaskCategory>(initialCategory ?? "w_gabinecie")
+  const [category, setCategory] = useState<TaskCategory>(() =>
+    autoCategoryFromDate
+      ? getCategoryForDate(validDefaultDate, resolveInCabinetWeekdays(validDefaultDate))
+      : (initialCategory ?? "w_gabinecie"),
+  )
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
@@ -167,7 +194,7 @@ export function AddTaskModal({
 
   // Initialise time: prefer defaultTime if it's a valid slot for the date, else pick first slot
   const [time, setTime] = useState(() => {
-    const dayTimeSlots = getSlotsForDate(validDefaultDate, slots)
+    const dayTimeSlots = resolveSlots(validDefaultDate)
     if (defaultTime && dayTimeSlots.includes(defaultTime)) return defaultTime
     return dayTimeSlots[0] ?? ""
   })
@@ -196,8 +223,8 @@ export function AddTaskModal({
 
   const blockedSlots = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
   const allSlotsForSelectedDate = useMemo(
-    () => (selectedDate ? getSlotsForDate(selectedDate, slots) : []),
-    [selectedDate, slots],
+    () => (selectedDate ? resolveSlots(selectedDate) : []),
+    [selectedDate, resolveSlots],
   )
 
   const freeSlotsByDate = useMemo(() => {
@@ -205,7 +232,7 @@ export function AddTaskModal({
 
     for (const { dateStr } of availableDates) {
       const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
-      const freeSlots = getSlotsForDate(dateStr, slots).filter(
+      const freeSlots = resolveSlots(dateStr).filter(
         (slot) =>
           isSlotWithinBookingWindow(dateStr, slot) &&
           fitsInDay(slot) &&
@@ -217,7 +244,7 @@ export function AddTaskModal({
     }
 
     return map
-  }, [availableDates, blockedSlotsByDate, slots, adminBlockedSlots, now, maxBookingDate])
+  }, [availableDates, blockedSlotsByDate, resolveSlots, adminBlockedSlots, now, maxBookingDate])
 
   const freeSlotsForSelectedDate = freeSlotsByDate.get(selectedDate) ?? []
   const hasFreeSlotsForSelectedDate = freeSlotsForSelectedDate.length > 0
@@ -267,6 +294,11 @@ export function AddTaskModal({
 
     setTime(freeSlotsForSelectedDate[0] ?? "")
   }, [selectedDate, isEditing, freeSlotsForSelectedDate, time])
+
+  useEffect(() => {
+    if (!autoCategoryFromDate || !selectedDate) return
+    setCategory(getCategoryForDate(selectedDate, resolveInCabinetWeekdays(selectedDate)))
+  }, [autoCategoryFromDate, selectedDate, resolveInCabinetWeekdays])
 
   const wouldConflict = useMemo(() => {
     if (!time) return false
@@ -318,12 +350,15 @@ export function AddTaskModal({
     setIsSubmitting(true)
     setNameError(null)
     setEmailError(null)
+    const resolvedCategory = autoCategoryFromDate
+      ? getCategoryForDate(selectedDate, resolveInCabinetWeekdays(selectedDate))
+      : category
     let result: void | boolean
     try {
       result = await onAdd({
         title: title.trim(),
         description: description.trim() || undefined,
-        category,
+        category: resolvedCategory,
         date: selectedDate,
         time: time || undefined,
         duration: SESSION_DURATION,
@@ -350,14 +385,44 @@ export function AddTaskModal({
     outline: "none",
   }
 
+  useEffect(() => {
+    const scrollY = window.scrollY
+    const { body } = document
+    const prev = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      paddingRight: body.style.paddingRight,
+    }
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+
+    body.style.overflow = "hidden"
+    body.style.position = "fixed"
+    body.style.top = `-${scrollY}px`
+    body.style.width = "100%"
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`
+    }
+
+    return () => {
+      body.style.overflow = prev.overflow
+      body.style.position = prev.position
+      body.style.top = prev.top
+      body.style.width = prev.width
+      body.style.paddingRight = prev.paddingRight
+      window.scrollTo(0, scrollY)
+    }
+  }, [])
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain"
       style={{ background: "rgba(0,0,0,0.2)", backdropFilter: "blur(6px)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
-        className="w-full max-w-md rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl max-h-[min(90vh,100%)] overflow-y-auto overscroll-contain my-auto"
         style={{
           background: "rgba(255,255,255,0.55)",
           backdropFilter: "blur(40px) saturate(200%)",
@@ -523,31 +588,53 @@ export function AddTaskModal({
             <label className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide">
               Typ wizyty
             </label>
-            <div className="flex gap-2 flex-wrap">
-              {CATEGORIES.map((cat) => {
-                const colors = CATEGORY_COLORS[cat.value]
-                const isSelected = category === cat.value
-                return (
-                  <button
-                    key={cat.value}
-                    type="button"
-                    onClick={() => setCategory(cat.value)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans transition-all duration-150 flex items-center gap-1.5"
-                    style={{
-                      background: isSelected ? colors.bg : "rgba(0,0,0,0.05)",
-                      border: isSelected ? `1px solid ${colors.border}` : "1px solid rgba(0,0,0,0.1)",
-                      color: isSelected ? colors.dot : "#64748b",
-                    }}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: colors.dot }}
-                    />
-                    {cat.label}
-                  </button>
-                )
-              })}
-            </div>
+            {autoCategoryFromDate ? (
+              <div>
+                <div
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold font-sans"
+                  style={{
+                    background: CATEGORY_COLORS[category].bg,
+                    border: `1px solid ${CATEGORY_COLORS[category].border}`,
+                    color: CATEGORY_COLORS[category].dot,
+                  }}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: CATEGORY_COLORS[category].dot }}
+                  />
+                  {CATEGORY_LABELS[category]}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500 font-sans leading-relaxed">
+                  Ustalane automatycznie na podstawie wybranej daty.
+                </p>
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {CATEGORIES.map((cat) => {
+                  const colors = CATEGORY_COLORS[cat.value]
+                  const isSelected = category === cat.value
+                  return (
+                    <button
+                      key={cat.value}
+                      type="button"
+                      onClick={() => setCategory(cat.value)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans transition-all duration-150 flex items-center gap-1.5"
+                      style={{
+                        background: isSelected ? colors.bg : "rgba(0,0,0,0.05)",
+                        border: isSelected ? `1px solid ${colors.border}` : "1px solid rgba(0,0,0,0.1)",
+                        color: isSelected ? colors.dot : "#64748b",
+                      }}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: colors.dot }}
+                      />
+                      {cat.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Notes */}

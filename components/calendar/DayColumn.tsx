@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react"
 import { format, isToday } from "date-fns"
+import { pl } from "date-fns/locale"
 import type { Task } from "@/lib/calendar-types"
 import {
   CALENDAR_START_HOUR,
@@ -65,7 +66,7 @@ export function DayColumn({
   const [isDragOver, setIsDragOver] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
 
-  const dayName = format(date, "EEE")
+  const dayName = format(date, "EEE", { locale: pl })
   const dayNum = format(date, "d")
   const today = isToday(date)
 
@@ -83,18 +84,21 @@ export function DayColumn({
         }}
       >
         <div
-          className="py-2 px-2 rounded-xl text-center"
+          className="py-1 px-0.5 sm:py-2 sm:px-2 rounded-md sm:rounded-xl text-center"
           style={{
             background: "rgba(255,255,255,0.12)",
             border: "1px solid rgba(255,255,255,0.2)",
             backdropFilter: "blur(10px)",
           }}
         >
-          <p className="text-slate-600 text-[9px] font-semibold uppercase tracking-widest font-sans">{dayName}</p>
-          <p className="text-slate-600 text-sm font-bold font-sans leading-tight">{dayNum}</p>
+          <p className="text-slate-600 text-[7px] sm:text-[9px] font-semibold uppercase tracking-wide sm:tracking-widest font-sans leading-none">
+            <span className="sm:hidden">{dayName.charAt(0)}</span>
+            <span className="hidden sm:inline">{dayName}</span>
+          </p>
+          <p className="text-slate-600 text-[10px] sm:text-sm font-bold font-sans leading-tight">{dayNum}</p>
         </div>
         <div
-          className="flex-1 mt-2 rounded-xl flex items-center justify-center"
+          className="flex-1 mt-1 sm:mt-2 rounded-md sm:rounded-xl flex items-center justify-center"
           style={{
             background: "rgba(255,255,255,0.06)",
             border: "1px dashed rgba(0,0,0,0.1)",
@@ -102,7 +106,7 @@ export function DayColumn({
           }}
         >
           <span
-            className="text-slate-800 text-[9px] font-sans"
+            className="hidden sm:inline text-slate-800 text-[9px] font-sans"
             style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
           >
             Weekend
@@ -123,7 +127,7 @@ export function DayColumn({
     <div className={`flex flex-col min-w-0 flex-1 ${isLocked ? "opacity-60" : ""}`}>
       {/* Day header */}
       <div
-        className="mb-2 py-2 px-3 rounded-xl text-center flex-shrink-0"
+        className="mb-1 sm:mb-2 py-1.5 px-1.5 sm:py-2 sm:px-3 rounded-lg sm:rounded-xl text-center flex-shrink-0"
         style={{
           background: isBlocked
             ? "rgba(254,226,226,0.25)"
@@ -148,14 +152,14 @@ export function DayColumn({
         }}
       >
         <p
-          className={`text-[10px] font-semibold uppercase tracking-widest font-sans ${
-            isBlocked ? "text-rose-400" : today ? "text-white/70" : isLocked ? "text-slate-400" : "text-slate-500"
+          className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide sm:tracking-widest font-sans ${
+            isBlocked ? "text-rose-400" : today ? "text-white/70" : isLocked ? "text-slate-400" : "text-slate-700"
           }`}
         >
           {dayName}
         </p>
         <p
-          className={`text-lg font-bold font-sans leading-tight ${
+          className={`text-sm sm:text-lg font-bold font-sans leading-tight ${
             isBlocked ? "text-rose-600" : today ? "text-white" : isLocked ? "text-slate-500" : "text-slate-700"
           }`}
         >
@@ -184,7 +188,7 @@ export function DayColumn({
                 onDrop(e, dateStr, gridTop)
               }
         }
-        className="relative rounded-xl overflow-hidden transition-all duration-200"
+        className="relative rounded-lg sm:rounded-xl overflow-hidden transition-all duration-200"
         style={{
           height: GRID_TOTAL_HEIGHT,
           background: isDragOver ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.18)",
@@ -219,12 +223,12 @@ export function DayColumn({
           return (
             <div
               key={slotTime}
-              className={`absolute left-1 right-1 group/avail ${isBookable ? "cursor-pointer" : ""}`}
+              className={`absolute left-0.5 right-0.5 sm:left-1 sm:right-1 group/avail ${isBookable ? "cursor-pointer" : ""}`}
               style={{ top: topPx, height: slotHeight, zIndex: 1 }}
               onClick={isBookable ? () => onAddTask(dateStr, slotTime) : undefined}
             >
               <div
-                className="h-full rounded-lg px-2 py-1.5 flex flex-col justify-center transition-colors duration-150 group-hover/avail:bg-white/50"
+                className="h-full rounded-md sm:rounded-lg px-1 py-1 sm:px-2 sm:py-1.5 flex flex-col justify-center transition-colors duration-150 group-hover/avail:bg-white/50"
                 style={{
                   border: slotBlocked
                     ? "1.5px dashed rgba(239,68,68,0.3)"
@@ -239,13 +243,13 @@ export function DayColumn({
                 }}
               >
                 <span
-                  className="text-[10px] font-semibold font-sans leading-tight"
+                  className="text-[9px] sm:text-[10px] font-semibold font-sans leading-tight"
                   style={{ color: slotBlocked ? "#b91c1c" : undefined }}
                 >
                   {slotTime}
                 </span>
                 <span
-                  className="text-[9px] font-sans"
+                  className="hidden sm:inline text-[9px] font-sans"
                   style={{ color: slotBlocked ? "#ef4444" : undefined }}
                 >
                   {slotBlocked ? "niedostępny" : "dostępny"}
@@ -268,7 +272,7 @@ export function DayColumn({
           return (
             <div
               key={task.id}
-              className="absolute left-1 right-1"
+              className="absolute left-0.5 right-0.5 sm:left-1 sm:right-1"
               style={{ top: topPx, height: taskHeight, zIndex: 10 }}
             >
               <TaskCard

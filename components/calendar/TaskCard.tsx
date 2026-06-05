@@ -93,7 +93,7 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
             }
           : undefined
       }
-      className={`group relative rounded-lg px-2 py-1.5 select-none transition-all duration-200 w-full overflow-hidden ${
+      className={`group relative rounded-md sm:rounded-lg px-1 py-1 sm:px-2 sm:py-1.5 select-none transition-all duration-200 w-full overflow-hidden ${
         isLocked ? "cursor-default opacity-70" : "cursor-grab active:cursor-grabbing hover:brightness-110"
       }`}
       style={{
@@ -192,19 +192,19 @@ export function TaskCard({ task, height, onDragStart, onDelete, isLocked = false
         )
       )}
 
-      <div className="pl-3 pr-3">
+      <div className="pl-2 pr-2 sm:pl-3 sm:pr-3">
         <div className="flex items-center gap-1 mb-0.5">
           <span
             className="w-1.5 h-1.5 rounded-full flex-shrink-0"
             style={{ backgroundColor: colors.dot }}
           />
-          <p className="text-slate-800 text-[11px] font-semibold leading-snug line-clamp-2 font-sans">
+          <p className="text-slate-800 text-[10px] sm:text-[11px] font-semibold leading-snug line-clamp-2 sm:line-clamp-2 line-clamp-1 font-sans">
             {task.title}
           </p>
         </div>
 
         {task.time && (
-          <div className="flex items-center gap-1">
+          <div className="hidden sm:flex items-center gap-1">
             <Clock className="w-2 h-2 text-slate-400 flex-shrink-0" />
             <span className="text-slate-800 text-[9px] font-sans">{task.time}</span>
           </div>

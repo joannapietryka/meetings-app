@@ -29,9 +29,14 @@ import {
   CALENDAR_END_HOUR,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
-  DAY_SLOTS,
   SESSION_DURATION,
 } from "@/lib/calendar-types"
+import { resolveSlotsForDate, type ScheduleSlotRecord } from "@/lib/schedule-slots"
+import {
+  resolveInCabinetWeekdaysForDate,
+  type InCabinetDayRecord,
+} from "@/lib/in-cabinet-days"
+import { formatInCabinetWeekdaysLabel, getCategoryForDate } from "@/lib/visit-category"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
 function meetingDateLocal(dateStr: string): Date {
@@ -157,10 +162,6 @@ function isDateInBookingWindow(day: Date, today: Date, maxBookingDate: Date): bo
   return !isBefore(sod, today) && !isAfter(sod, maxBookingDate)
 }
 
-function getSlotsForDate(dateStr: string, slots: Record<number, string[]>): string[] {
-  return slots[meetingDateLocal(dateStr).getDay()] ?? []
-}
-
 function fitsInDay(time: string): boolean {
   const [h, m] = time.split(":").map(Number)
   return h * 60 + m + SESSION_DURATION <= CALENDAR_END_HOUR * 60
@@ -197,16 +198,16 @@ export function GuestDashboard() {
   }, [blockedSlotsData])
 
   const { data: scheduleData } = db.useQuery({ scheduleSlots: {} })
-  const dynamicDaySlots = useMemo<Record<number, string[]>>(() => {
-    const records = (scheduleData?.scheduleSlots ?? []) as unknown as { day: number; slots: string }[]
-    const map: Record<number, string[]> = { ...DAY_SLOTS }
-    for (const r of records) {
-      try {
-        map[r.day] = JSON.parse(r.slots)
-      } catch {}
-    }
-    return map
-  }, [scheduleData])
+  const scheduleSlotRecords = useMemo(
+    () => (scheduleData?.scheduleSlots ?? []) as ScheduleSlotRecord[],
+    [scheduleData],
+  )
+
+  const { data: bookingSettingsData } = db.useQuery({ bookingSettings: {} })
+  const inCabinetDayRecords = useMemo(
+    () => (bookingSettingsData?.bookingSettings ?? []) as InCabinetDayRecord[],
+    [bookingSettingsData],
+  )
 
   const sortedMeetings = useMemo(
     () => [...myMeetings].sort((a, b) => toDateTime(a) - toDateTime(b)),
@@ -215,6 +216,14 @@ export function GuestDashboard() {
 
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(new Date()), [])
+  const todayStr = useMemo(() => format(today, "yyyy-MM-dd"), [today])
+  const inCabinetWeekdaysLabel = useMemo(
+    () =>
+      formatInCabinetWeekdaysLabel(
+        resolveInCabinetWeekdaysForDate(todayStr, inCabinetDayRecords),
+      ),
+    [todayStr, inCabinetDayRecords],
+  )
   /** Inclusive last day guests may book (30 days from today). */
   const maxBookingDate = useMemo(() => addDays(today, 30), [today])
   const minBookingDateTime = useMemo(() => addHours(now, 2), [now])
@@ -433,7 +442,7 @@ export function GuestDashboard() {
           .map((meeting) => meeting.time as string),
       )
 
-      const hasFreeSlot = getSlotsForDate(dateStr, dynamicDaySlots).some((slot) => {
+      const hasFreeSlot = resolveSlotsForDate(dateStr, scheduleSlotRecords).some((slot) => {
         const [h, m] = slot.split(":").map(Number)
         const slotDateTime = new Date(day)
         slotDateTime.setHours(h, m, 0, 0)
@@ -450,7 +459,7 @@ export function GuestDashboard() {
     }
 
     return map
-  }, [today, maxBookingDate, availabilityMeetings, blockedDateSet, adminBlockedSlots, minBookingDateTime, dynamicDaySlots])
+  }, [today, maxBookingDate, availabilityMeetings, blockedDateSet, adminBlockedSlots, minBookingDateTime, scheduleSlotRecords])
 
   const unavailableDates = useMemo(() => {
     const combined = new Set(disabledDates)
@@ -488,6 +497,27 @@ export function GuestDashboard() {
     return weeks
   }, [calendarDays])
 
+  const cabinetDayByDate = useMemo(() => {
+    const map = new Map<string, boolean>()
+    for (const day of calendarDays) {
+      if (isWeekend(day)) continue
+      const dateStr = format(day, "yyyy-MM-dd")
+      const inCabinetWeekdays = resolveInCabinetWeekdaysForDate(dateStr, inCabinetDayRecords)
+      map.set(dateStr, inCabinetWeekdays.includes(day.getDay()))
+    }
+    return map
+  }, [calendarDays, inCabinetDayRecords])
+
+  const cabinetColumnWeekdays = useMemo(() => {
+    const weekdays = new Set<number>()
+    for (const day of calendarDays) {
+      if (isWeekend(day)) continue
+      const dateStr = format(day, "yyyy-MM-dd")
+      if (cabinetDayByDate.get(dateStr)) weekdays.add(day.getDay())
+    }
+    return weekdays
+  }, [calendarDays, cabinetDayByDate])
+
   const availabilityReady = availabilityStatus === "ready"
   const availabilityUsable = availabilityReady || hasAvailabilitySnapshot
 
@@ -502,7 +532,7 @@ export function GuestDashboard() {
       if (isWeekend(date)) return false
       if (!isDateInBookingWindow(date, today, maxBookingDate)) return false
       if (blockedDateSet.has(dateStr)) return false
-      if (!getSlotsForDate(dateStr, dynamicDaySlots).includes(time)) return false
+      if (!resolveSlotsForDate(dateStr, scheduleSlotRecords).includes(time)) return false
       if (!fitsInDay(time)) return false
       if (adminBlockedSlots.get(dateStr)?.has(time)) return false
 
@@ -516,15 +546,15 @@ export function GuestDashboard() {
         return meeting.date === dateStr && meeting.time === time
       })
     },
-    [today, maxBookingDate, blockedDateSet, dynamicDaySlots, adminBlockedSlots, minBookingDateTime],
+    [today, maxBookingDate, blockedDateSet, scheduleSlotRecords, adminBlockedSlots, minBookingDateTime],
   )
 
   const hasFreeSlotOnDate = useCallback(
     (dateStr: string, meetings: AvailabilityMeeting[], excludeMeetingId?: string) => {
-      const slots = getSlotsForDate(dateStr, dynamicDaySlots)
+      const slots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
       return slots.some((slot) => isSlotAvailable(dateStr, slot, meetings, excludeMeetingId))
     },
-    [dynamicDaySlots, isSlotAvailable],
+    [scheduleSlotRecords, isSlotAvailable],
   )
 
   const findNextAvailableDateForMeetings = useCallback(
@@ -784,7 +814,7 @@ export function GuestDashboard() {
     >
       <header className="relative z-10 px-4 pt-4 pb-3 sm:px-6 sm:pt-6 sm:pb-4 flex-shrink-0">
         <div
-          className="max-w-5xl mx-auto rounded-2xl px-4 py-3.5 sm:px-5 flex items-center justify-between gap-3"
+          className="max-w-5xl mx-auto rounded-2xl px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3"
           style={{
             background: "rgba(255,255,255,0.28)",
             backdropFilter: "blur(30px) saturate(180%)",
@@ -805,8 +835,14 @@ export function GuestDashboard() {
             </div>
             <div className="min-w-0">
               <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Moje wizyty</h1>
-              <p className="text-slate-800 text-xs font-sans">
-                Maks. 1 wizyta w tygodniu, 4 w miesiącu, tylko dni robocze i 30 dni do przodu.
+              <p className="text-slate-800 text-[11px] sm:text-xs font-sans leading-snug">
+                <span className="sm:hidden">1 wizyta/tydz., 4/mies., 30 dni do przodu</span>
+                <span className="hidden sm:inline">
+                  Maks. 1 wizyta w tygodniu, 4 w miesiącu, tylko dni robocze i 30 dni do przodu.
+                </span>
+              </p>
+              <p className="hidden sm:block text-slate-600 text-xs font-sans mt-1">
+                {inCabinetWeekdaysLabel} — wizyty w gabinecie, pozostałe dni — online.
               </p>
             </div>
           </div>
@@ -817,7 +853,7 @@ export function GuestDashboard() {
             onClick={() => {
               void openFreshBookingModal()
             }}
-            className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold font-sans text-sm text-white transition-all duration-200 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+            className="w-full sm:w-auto sm:ml-1 flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-xl font-semibold font-sans text-sm text-white transition-all duration-200 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 shrink-0"
             style={{
               backgroundColor: "#0C115B",
               boxShadow: "0 4px 16px rgba(12,17,91,0.35), inset 0 1px 0 rgba(255,255,255,0.2)",
@@ -830,8 +866,8 @@ export function GuestDashboard() {
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 px-4 pb-4 overflow-auto sm:px-6">
-        <div className="max-w-5xl mx-auto flex items-center gap-4 mb-3 px-1 flex-wrap">
+      <main className="relative z-10 flex-1 px-3 pb-4 overflow-x-hidden overflow-y-auto sm:px-6">
+        <div className="max-w-5xl mx-auto flex items-center gap-2 sm:gap-4 mb-2 sm:mb-3 px-0.5 sm:px-1 flex-wrap">
           {(Object.keys(CATEGORY_LABELS) as TaskCategory[]).map((cat) => {
             const colors = CATEGORY_COLORS[cat]
             return (
@@ -850,13 +886,16 @@ export function GuestDashboard() {
             />
             <span className="text-slate-800 text-[11px] font-sans">Termin niedostępny</span>
           </div>
-          <span className="sm:ml-auto text-slate-800 text-[11px] font-sans">
+          <span className="hidden sm:inline sm:ml-auto text-slate-800 text-[11px] font-sans">
             Kliknij dzień, aby dodać lub edytować wizytę
           </span>
+          <p className="w-full sm:hidden text-slate-800 text-[10px] font-sans leading-snug">
+            Kliknij dzień w kalendarzu, aby dodać lub edytować wizytę.
+          </p>
         </div>
         {!availabilityUsable && (
           <div
-            className="max-w-5xl mx-auto mb-3 px-3 py-2 rounded-xl text-xs font-semibold font-sans flex items-center justify-between gap-3"
+            className="max-w-5xl mx-auto mb-3 px-3 py-2 rounded-xl text-xs font-semibold font-sans flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3"
             style={{
               background:
                 availabilityStatus === "error"
@@ -880,7 +919,7 @@ export function GuestDashboard() {
               onClick={() => {
                 refreshAvailability().catch(() => {})
               }}
-              className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold font-sans transition-colors hover:bg-white/30"
+              className="shrink-0 self-end sm:self-auto px-2.5 py-1 rounded-lg text-[11px] font-bold font-sans transition-colors hover:bg-white/30"
               style={{
                 border: "1px solid rgba(0,0,0,0.1)",
                 background: "rgba(255,255,255,0.22)",
@@ -893,7 +932,7 @@ export function GuestDashboard() {
           </div>
         )}
         <div
-          className="rounded-2xl p-3 sm:p-4 max-w-5xl mx-auto"
+          className="rounded-2xl p-2 sm:p-4 max-w-5xl mx-auto"
           data-testid="guest-calendar"
           style={{
             background: "rgba(255,255,255,0.18)",
@@ -932,21 +971,44 @@ export function GuestDashboard() {
             </div>
           </div>
 
-          <div className="flex gap-1.5 text-center text-[10px] sm:text-xs font-semibold text-slate-800 uppercase tracking-wide mb-1.5">
-            {["pon", "wt", "śr", "czw", "pt", "sob", "nd"].map((wd, idx) => (
-              <div
-                key={wd}
-                className="py-1"
-                style={{ flex: idx >= 5 ? "0 0 36px" : "1 1 0" }}
-              >
-                {wd}
-              </div>
-            ))}
+          <div className="flex gap-0.5 sm:gap-1.5 text-center text-[9px] sm:text-xs font-semibold text-slate-800 uppercase tracking-wide mb-1 sm:mb-1.5">
+            {["pon", "wt", "śr", "czw", "pt", "sob", "nd"].map((wd, idx) => {
+              const headerWeekday = [1, 2, 3, 4, 5, 6, 0][idx]
+              const isCabinetColumn = idx < 5 && cabinetColumnWeekdays.has(headerWeekday)
+              return (
+                <div
+                  key={wd}
+                  className={`flex flex-col items-center gap-0.5 py-1 ${
+                    idx >= 5 ? "flex-[0_0_16px] sm:flex-[0_0_36px]" : "flex-1 min-w-0"
+                  }`}
+                >
+                  {isCabinetColumn ? (
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ backgroundColor: CATEGORY_COLORS.w_gabinecie.dot }}
+                      title="Wizyty w gabinecie"
+                    />
+                  ) : (
+                    <span className={`shrink-0 ${idx >= 5 ? "h-1 sm:h-1.5" : "h-1.5"}`} aria-hidden />
+                  )}
+                  <span className={idx >= 5 ? "text-[8px] sm:text-inherit leading-none" : undefined}>
+                    {idx >= 5 ? (
+                      <>
+                        <span className="sm:hidden">{wd.charAt(0)}</span>
+                        <span className="hidden sm:inline">{wd}</span>
+                      </>
+                    ) : (
+                      wd
+                    )}
+                  </span>
+                </div>
+              )
+            })}
           </div>
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1 sm:gap-1.5">
             {calendarWeeks.map((week, weekIndex) => (
-              <div key={`week-${weekIndex}`} className="flex gap-1.5">
+              <div key={`week-${weekIndex}`} className="flex gap-0.5 sm:gap-1.5">
                 {week.map((day) => {
                   const dateStr = format(day, "yyyy-MM-dd")
                   const inMonth = isSameMonth(day, visibleMonth)
@@ -958,6 +1020,7 @@ export function GuestDashboard() {
                   const hasVisit = booked.length > 0
                   const mineOnDay = myMeetings.find((m) => m.date === dateStr)
                   const isWeekendCell = isWeekend(day)
+                  const isCabinetDay = !isWeekendCell && (cabinetDayByDate.get(dateStr) ?? false)
                   const disabledReason =
                     disabledDateReasons.get(dateStr) ??
                     (hasFreeSlotsByDate.get(dateStr) === false ? "no_slots" : undefined)
@@ -966,7 +1029,6 @@ export function GuestDashboard() {
                   const colors = mineOnDay ? CATEGORY_COLORS[mineOnDay.category] : undefined
 
                   const canClick =
-                    inMonth &&
                     !isCalendarDisabled &&
                     (Boolean(mineOnDay) ||
                       (availabilityUsable && !blockedDateSet.has(dateStr) && !unavailableDates.has(dateStr)))
@@ -980,12 +1042,12 @@ export function GuestDashboard() {
                     ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0C115B]/50"
                     : "pointer-events-none"
 
-                  const cellClass = `relative overflow-hidden rounded-xl flex h-full flex-col transition-colors text-slate-800 w-full ${
+                  const cellClass = `relative overflow-hidden flex h-full flex-col transition-colors text-slate-800 w-full ${
                     isWeekendCell
-                      ? "min-h-[92px] self-stretch items-center justify-start px-1 py-2 text-center"
-                      : "min-h-[88px] sm:min-h-[112px] p-2 items-start text-left"
+                      ? "rounded-md sm:rounded-xl min-h-[64px] sm:min-h-[92px] self-stretch items-center justify-center sm:justify-start px-0 sm:px-1 py-1 sm:py-2 text-center"
+                      : "rounded-xl min-h-[76px] sm:min-h-[112px] p-1.5 sm:p-2 items-start text-left"
                   } ${interactiveClass} ${isTodayCell ? "ring-2 ring-[#0C115B]/40" : ""} ${
-                    !inMonth ? "text-slate-400" : ""
+                    !inMonth && !canClick ? "text-slate-400" : !inMonth ? "text-slate-600" : ""
                   }`.trim()
 
                   const cellStyle: React.CSSProperties = {
@@ -1023,19 +1085,29 @@ export function GuestDashboard() {
 
                   const inner = (
                     <>
+                      {isCabinetDay && (
+                        <div
+                          className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
+                          style={{ backgroundColor: CATEGORY_COLORS.w_gabinecie.dot, opacity: 0.75 }}
+                          title="Dzień wizyt w gabinecie"
+                          aria-hidden
+                        />
+                      )}
                       <div
                         className={`w-full ${isWeekendCell ? "flex flex-col items-center gap-1" : "flex items-start justify-between gap-1"}`}
                       >
                         <span
                           className={`font-semibold tabular-nums ${
-                            isWeekendCell ? "text-[11px] text-slate-600" : "text-xs sm:text-sm"
+                            isWeekendCell
+                              ? "text-[8px] sm:text-[11px] text-slate-500 sm:text-slate-600 leading-none"
+                              : "text-xs sm:text-sm"
                           }`}
                         >
                           {format(day, "d", { locale: pl })}
                         </span>
                         {mineOnDay && colors && !isWeekendCell && (
                           <span
-                            className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold font-sans whitespace-nowrap"
+                            className="hidden sm:inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold font-sans whitespace-nowrap"
                             style={{
                               background: showsDisabledVisit ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.45)",
                               border: showsDisabledVisit
@@ -1049,17 +1121,24 @@ export function GuestDashboard() {
                         )}
                         {!mineOnDay && canClick && !isWeekendCell && (
                           <span
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/45 bg-white/35 text-slate-600 shadow-sm"
+                            className="inline-flex h-4 w-4 sm:h-5 sm:w-5 shrink-0 items-center justify-center rounded-full border border-white/45 bg-white/35 text-slate-600 shadow-sm"
                             aria-hidden="true"
                           >
-                            <Plus className="h-3 w-3" />
+                            <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                           </span>
+                        )}
+                        {mineOnDay && colors && !isWeekendCell && (
+                          <span
+                            className="sm:hidden w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: colors.dot }}
+                            aria-hidden
+                          />
                         )}
                       </div>
 
                       {mineOnDay && colors && !isWeekendCell && (
                         <div
-                          className="mt-2 w-full rounded-lg px-2 py-1.5 h-full flex flex-col justify-between"
+                          className="hidden sm:flex mt-2 w-full rounded-lg px-2 py-1.5 h-full flex-col justify-between"
                           style={{
                             background: showsDisabledVisit ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.38)",
                             border: showsDisabledVisit
@@ -1098,26 +1177,30 @@ export function GuestDashboard() {
                       )}
 
                       {!mineOnDay && disabledReason === "week_limit" && !isCalendarDisabled && (
-                        <span className="mt-auto text-[9px] sm:text-[10px] leading-tight text-slate-600  font-sans">
-                          maks. 1 wizyta w tygodniu
+                        <span className="mt-auto text-[8px] sm:text-[10px] leading-tight text-slate-600 font-sans text-center sm:text-left w-full">
+                          <span className="sm:hidden">1/tydz.</span>
+                          <span className="hidden sm:inline">maks. 1 wizyta w tygodniu</span>
                         </span>
                       )}
 
                       {!mineOnDay && disabledReason === "month_limit" && !isCalendarDisabled && (
-                        <span className="mt-auto text-[9px] sm:text-[10px] leading-tight text-slate-600 font-semibold font-sans">
-                          limit 4 wizyt w miesiącu
+                        <span className="mt-auto text-[8px] sm:text-[10px] leading-tight text-slate-600 font-semibold font-sans text-center sm:text-left w-full">
+                          <span className="sm:hidden">4/mies.</span>
+                          <span className="hidden sm:inline">limit 4 wizyt w miesiącu</span>
                         </span>
                       )}
 
                       {!mineOnDay && disabledReason === "blocked" && !isCalendarDisabled && (
-                        <span className="mt-auto text-[9px] sm:text-[10px] leading-tight text-rose-600 font-semibold font-sans">
-                          dzień niedostępny
+                        <span className="mt-auto text-[8px] sm:text-[10px] leading-tight text-rose-600 font-semibold font-sans text-center sm:text-left w-full">
+                          <span className="sm:hidden">niedost.</span>
+                          <span className="hidden sm:inline">dzień niedostępny</span>
                         </span>
                       )}
 
                       {!mineOnDay && disabledReason === "no_slots" && !isCalendarDisabled && (
-                        <span className="mt-auto text-[9px] sm:text-[10px] leading-tight text-rose-600 font-semibold font-sans">
-                          brak wolnych terminów
+                        <span className="mt-auto text-[8px] sm:text-[10px] leading-tight text-rose-600 font-semibold font-sans text-center sm:text-left w-full">
+                          <span className="sm:hidden">brak terminów</span>
+                          <span className="hidden sm:inline">brak wolnych terminów</span>
                         </span>
                       )}
                     </>
@@ -1150,8 +1233,9 @@ export function GuestDashboard() {
                   return (
                     <div
                       key={dateStr}
-                      className="self-stretch"
-                      style={{ flex: isWeekendCell ? "0 0 36px" : "1 1 0" }}
+                      className={`self-stretch ${
+                        isWeekendCell ? "flex-[0_0_16px] sm:flex-[0_0_36px]" : "flex-1 min-w-0"
+                      }`}
                     >
                       {cell}
                     </div>
@@ -1172,7 +1256,7 @@ export function GuestDashboard() {
                 return (
                 <li
                   key={m.id}
-                  className="rounded-2xl px-4 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+                  className="rounded-2xl px-3 py-3 sm:px-4 sm:py-4 flex flex-col gap-3 sm:gap-4 md:flex-row md:items-center md:justify-between"
                   style={{
                     background: colors.bg,
                     border: `1px solid ${colors.border}`,
@@ -1198,9 +1282,9 @@ export function GuestDashboard() {
                         {CATEGORY_LABELS[m.category] ?? m.category}
                       </span>
                     </div>
-                    <div className="mt-3 flex flex-wrap items-stretch gap-2">
+                    <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch gap-2">
                       <div
-                        className="flex items-center gap-3 rounded-xl px-3 py-2.5 min-w-[220px] flex-1"
+                        className="flex items-center gap-3 rounded-xl px-3 py-2.5 w-full min-w-0 sm:min-w-[220px] sm:flex-1"
                         style={{
                           background: "rgba(255,255,255,0.68)",
                           border: `1px solid ${colors.border}`,
@@ -1217,49 +1301,56 @@ export function GuestDashboard() {
                           <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-sans">
                             Data wizyty
                           </div>
-                          <div className="text-sm font-semibold text-slate-800 leading-tight">{visitDate}</div>
-                        </div>
-                      </div>
-                      {m.time && (
-                        <div
-                          className="flex items-center gap-3 rounded-xl px-3 py-2.5 min-w-[145px]"
-                          style={{
-                            background: "rgba(255,255,255,0.82)",
-                            border: `1px solid ${colors.border}`,
-                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
-                          }}
-                        >
-                          <span
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                            style={{ background: "rgba(255,255,255,0.9)", color: colors.dot }}
-                          >
-                            <Clock3 className="w-4 h-4" />
-                          </span>
-                          <div>
-                            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-sans">
-                              Godzina
-                            </div>
-                            <div className="text-base font-bold text-slate-800 leading-tight">{m.time}</div>
+                          <div className="text-sm font-semibold text-slate-800 leading-tight">
+                            <span className="sm:hidden">
+                              {format(meetingDateLocal(m.date), "EEE, d MMM yyyy", { locale: pl })}
+                            </span>
+                            <span className="hidden sm:inline">{visitDate}</span>
                           </div>
                         </div>
-                      )}
-                      {m.duration ? (
-                        <div
-                          className="inline-flex items-center rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700"
-                          style={{
-                            background: "rgba(255,255,255,0.45)",
-                            border: `1px solid ${colors.border}`,
-                          }}
-                        >
-                          {m.duration} min
-                        </div>
-                      ) : null}
+                      </div>
+                      <div className="flex gap-2 w-full sm:contents">
+                        {m.time && (
+                          <div
+                            className="flex items-center gap-3 rounded-xl px-3 py-2.5 min-w-0 flex-1 sm:min-w-[145px] sm:flex-none"
+                            style={{
+                              background: "rgba(255,255,255,0.82)",
+                              border: `1px solid ${colors.border}`,
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
+                            }}
+                          >
+                            <span
+                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                              style={{ background: "rgba(255,255,255,0.9)", color: colors.dot }}
+                            >
+                              <Clock3 className="w-4 h-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-sans">
+                                Godzina
+                              </div>
+                              <div className="text-base font-bold text-slate-800 leading-tight">{m.time}</div>
+                            </div>
+                          </div>
+                        )}
+                        {m.duration ? (
+                          <div
+                            className="inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 sm:self-auto"
+                            style={{
+                              background: "rgba(255,255,255,0.45)",
+                              border: `1px solid ${colors.border}`,
+                            }}
+                          >
+                            {m.duration} min
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex gap-2 self-start">
+                  <div className="flex gap-2 self-stretch sm:self-start w-full sm:w-auto">
                     <button
                       type="button"
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+                      className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
                       style={{
                         backgroundColor: "#0C115B",
                         boxShadow: "0 3px 10px rgba(12,17,91,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
@@ -1275,7 +1366,7 @@ export function GuestDashboard() {
                     </button>
                     <button
                       type="button"
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
+                      className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
                       onClick={(e) => {
                         e.preventDefault()
                         deleteButtonRef.current = e.currentTarget
@@ -1292,10 +1383,10 @@ export function GuestDashboard() {
         )}
       </main>
 
-      <footer className="px-4 pb-4 flex justify-between items-center gap-3">
+      <footer className="px-3 sm:px-4 pb-4 max-w-5xl mx-auto mt-10 w-full flex flex-col-reverse sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-3">
         <button
           onClick={() => setShowDeleteAccount(true)}
-          className="px-4 py-3 rounded-xl text-sm font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
+          className="w-full sm:w-auto px-4 py-3 rounded-xl text-sm font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
         >
           Usuń konto
         </button>
@@ -1306,7 +1397,7 @@ export function GuestDashboard() {
               alert(err?.body?.message ?? err?.message ?? "Nie udało się wylogować.")
             })
           }}
-          className="px-4 py-3 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+          className="w-full sm:w-auto px-4 py-3 rounded-xl text-sm font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
           style={{
             backgroundColor: "#0C115B",
             boxShadow: "0 4px 16px rgba(12,17,91,0.35), inset 0 1px 0 rgba(255,255,255,0.2)",
@@ -1323,7 +1414,7 @@ export function GuestDashboard() {
           defaultDate={modalDefaultDate}
           defaultTime={editing?.time}
           existingTasks={availabilityMeetings as any}
-          daySlots={dynamicDaySlots}
+          scheduleRecords={scheduleSlotRecords}
           initialTitle={editing?.title}
           prefillTitle={editing ? undefined : readGuestCachedDisplayName()}
           initialDescription={editing?.description}
@@ -1332,6 +1423,8 @@ export function GuestDashboard() {
           disabledDates={unavailableDates}
           adminBlockedSlots={adminBlockedSlots}
           maxBookableDate={maxBookingDate}
+          autoCategoryFromDate
+          inCabinetDayRecords={inCabinetDayRecords}
           onClose={() => {
             setShowForm(false)
             setEditing(null)
@@ -1344,6 +1437,15 @@ export function GuestDashboard() {
             time?: string
             duration?: number
           }) => {
+            const expectedCategory = getCategoryForDate(
+              payload.date,
+              resolveInCabinetWeekdaysForDate(payload.date, inCabinetDayRecords),
+            )
+            if (payload.category !== expectedCategory) {
+              alert("Typ wizyty nie odpowiada wybranemu dniu. Odśwież stronę i spróbuj ponownie.")
+              return false
+            }
+
             if (editing) {
               if (payload.date !== editing.date) {
                 const dayCount = relevantMeetings.filter((x) => x.date === payload.date).length
@@ -1559,11 +1661,11 @@ export function GuestDashboard() {
 
       {showDeleteAccount && (
         <div
-          className="fixed inset-0 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
           style={{ background: "rgba(0,0,0,0.2)", backdropFilter: "blur(6px)" }}
         >
           <div
-            className="w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+            className="w-full max-w-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 shadow-2xl"
             style={{
               background: "rgba(255,255,255,0.90)",
               backdropFilter: "blur(40px) saturate(200%)",
@@ -1600,11 +1702,11 @@ export function GuestDashboard() {
 
       {showThanks && lastCreated && (
         <div
-          className="fixed inset-0 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50"
           style={{ background: "rgba(0,0,0,0.2)", backdropFilter: "blur(6px)" }}
         >
           <div
-            className="w-full max-w-md rounded-2xl p-6 shadow-2xl relative"
+            className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 shadow-2xl relative"
             style={{
               background: "rgba(255,255,255,0.55)",
               backdropFilter: "blur(40px) saturate(200%)",
