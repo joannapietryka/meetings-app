@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   title: "Planer wizyt  - psycholog Katarzyna Pietryka",
   description: "Planer wizyt dostępnny dla pacjentów psycholog Katarzyna Pietryka",
   generator: "v0.app",
+  icons: {
+    icon: "/favicon.png",
+  },
 }
 
 export default function RootLayout({

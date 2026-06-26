@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { eachDayOfInterval, format, parseISO } from "date-fns"
 import { pl } from "date-fns/locale"
 import { ChevronLeft, Plus, X, CalendarDays, Users, Ban } from "lucide-react"
@@ -19,6 +19,12 @@ import {
   type InCabinetDayRecord,
 } from "@/lib/in-cabinet-days"
 import { WORK_WEEKDAYS } from "@/lib/visit-category"
+import { TimePickerInput } from "@/components/calendar/TimePickerInput"
+import { getScheduleSlotError } from "@/lib/slot-conflicts"
+import {
+  getCalendarViewRange,
+  isDateInCalendarViewRange,
+} from "@/lib/calendar-view-range"
 
 interface AdminSettingsProps {
   onBack: () => void
@@ -37,6 +43,9 @@ const glassCard: React.CSSProperties = {
 }
 
 export function AdminSettings({ onBack }: AdminSettingsProps) {
+  const calendarViewRange = useMemo(() => getCalendarViewRange(), [])
+  const { todayStr, maxBookingDateStr } = calendarViewRange
+
   const { data: scheduleData } = db.useQuery({ scheduleSlots: {} })
   const { data: usersData } = db.useQuery({ allowedUsers: {} })
   const { data: blockedData } = db.useQuery({ blockedDates: {} })
@@ -96,15 +105,41 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
     () => (blockedSlotsData?.blockedSlots ?? []) as BlockedSlotRecord[],
     [blockedSlotsData],
   )
+
+  const visibleBlockedDates = useMemo(
+    () => blockedDates.filter((b) => isDateInCalendarViewRange(b.date, calendarViewRange)),
+    [blockedDates, calendarViewRange],
+  )
+
+  const visibleBlockedSlotRecords = useMemo(
+    () => blockedSlotRecords.filter((r) => isDateInCalendarViewRange(r.date, calendarViewRange)),
+    [blockedSlotRecords, calendarViewRange],
+  )
+
+  useEffect(() => {
+    const staleDates = blockedDates.filter(
+      (b) => !isDateInCalendarViewRange(b.date, calendarViewRange),
+    )
+    const staleSlots = blockedSlotRecords.filter(
+      (r) => !isDateInCalendarViewRange(r.date, calendarViewRange),
+    )
+    if (staleDates.length === 0 && staleSlots.length === 0) return
+
+    db.transact([
+      ...staleDates.map((b) => (db.tx.blockedDates as any)[b.id].delete()),
+      ...staleSlots.map((r) => (db.tx.blockedSlots as any)[r.id].delete()),
+    ])
+  }, [blockedDates, blockedSlotRecords, calendarViewRange])
+
   // date → Set<time>
   const blockedSlotMap = useMemo(() => {
     const map = new Map<string, Set<string>>()
-    for (const r of blockedSlotRecords) {
+    for (const r of visibleBlockedSlotRecords) {
       if (!map.has(r.date)) map.set(r.date, new Set())
       map.get(r.date)!.add(r.time)
     }
     return map
-  }, [blockedSlotRecords])
+  }, [visibleBlockedSlotRecords])
 
   const getSlotsForDay = (day: number): string[] =>
     resolveSlotsForWeekdayAtEffectiveFrom(day, scheduleEditEffectiveFrom, slotRecords)
@@ -130,7 +165,8 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
     const t = newTime[day]?.trim()
     if (!t) return
     const current = getSlotsForDay(day)
-    if (current.includes(t)) return
+    const error = getScheduleSlotError(t, current)
+    if (error) return
     saveSlots(day, [...current, t])
     setNewTime((p) => ({ ...p, [day]: "" }))
   }
@@ -179,7 +215,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   const toggleBlockedSlot = (date: string, time: string) => {
     const isCurrentlyBlocked = blockedSlotMap.get(date)?.has(time)
     if (isCurrentlyBlocked) {
-      const record = blockedSlotRecords.find((r) => r.date === date && r.time === time)
+      const record = visibleBlockedSlotRecords.find((r) => r.date === date && r.time === time)
       if (record) db.transact((db.tx.blockedSlots as any)[record.id].delete())
     } else {
       db.transact((db.tx.blockedSlots as any)[id()].create({ date, time }))
@@ -192,8 +228,6 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   const [newBlockedReason, setNewBlockedReason] = useState("")
   const [blockedDateError, setBlockedDateError] = useState("")
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
-
   const addBlockedDate = () => {
     const from = newBlockedDateFrom.trim()
     if (!from) return
@@ -202,13 +236,23 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
       setBlockedDateError("Data końcowa musi być taka sama lub późniejsza niż początkowa")
       return
     }
+    if (!isDateInCalendarViewRange(from, calendarViewRange)) {
+      setBlockedDateError("Data początkowa musi mieścić się w widoku kalendarza")
+      return
+    }
+    if (!isDateInCalendarViewRange(to, calendarViewRange)) {
+      setBlockedDateError("Data końcowa musi mieścić się w widoku kalendarza")
+      return
+    }
 
     const datesInRange = eachDayOfInterval({
       start: parseISO(from),
       end: parseISO(to),
-    }).map((d) => format(d, "yyyy-MM-dd"))
+    })
+      .map((d) => format(d, "yyyy-MM-dd"))
+      .filter((d) => isDateInCalendarViewRange(d, calendarViewRange))
 
-    const existing = new Set(blockedDates.map((b) => b.date))
+    const existing = new Set(visibleBlockedDates.map((b) => b.date))
     const toCreate = datesInRange.filter((d) => !existing.has(d))
     if (toCreate.length === 0) {
       setBlockedDateError("Wybrane dni są już zablokowane")
@@ -257,7 +301,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/rose-bg.jpeg')] before:bg-cover before:bg-center before:opacity-80 before:z-[-1]">
+    <div className="relative min-h-screen flex flex-col before:content-[''] before:absolute before:inset-0 before:bg-[url('/images/x-bg.webp')] before:bg-cover before:bg-center before:opacity-80 before:z-[-1]">
       {/* Header */}
       <header className="relative z-10 px-6 pt-6 pb-4 flex-shrink-0">
         <div
@@ -392,6 +436,8 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
             <div className="flex flex-col gap-4">
               {WORK_WEEKDAYS.map(({ day, label }) => {
                 const slots = getSlotsForDay(day)
+                const pendingSlot = newTime[day]?.trim() ?? ""
+                const slotError = getScheduleSlotError(pendingSlot, slots)
                 return (
                   <div key={day}>
                     <p className="text-slate-800 text-xs font-bold font-sans uppercase tracking-wider mb-2">
@@ -426,26 +472,25 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                     </div>
 
                     {/* Add slot */}
-                    <div className="flex gap-2">
-                      <input
-                        type="time"
+                    <div className="flex gap-2 items-center">
+                      <TimePickerInput
                         value={newTime[day] ?? ""}
-                        onChange={(e) =>
-                          setNewTime((p) => ({ ...p, [day]: e.target.value }))
-                        }
-                        onKeyDown={(e) => e.key === "Enter" && addSlot(day)}
-                        className="rounded-xl px-3 py-1.5 text-sm font-sans transition-colors"
-                        style={{ ...inputStyle, width: 130 }}
+                        onChange={(t) => setNewTime((p) => ({ ...p, [day]: t }))}
+                        inputStyle={{ ...inputStyle, padding: "6px 12px" }}
                       />
                       <button
                         onClick={() => addSlot(day)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold font-sans text-white transition-all hover:-translate-y-0.5"
+                        disabled={!pendingSlot || !!slotError}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold font-sans text-white transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                         style={{ backgroundColor: "#0C115B", border: "1px solid rgba(12,17,91,0.6)" }}
                       >
                         <Plus className="w-3 h-3" />
                         Dodaj
                       </button>
                     </div>
+                    {slotError && (
+                      <p className="mt-1.5 text-[11px] text-red-600 font-sans">{slotError}</p>
+                    )}
                   </div>
                 )
               })}
@@ -510,7 +555,8 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 type="date"
                 value={slotBlockDate}
                 onChange={(e) => setSlotBlockDate(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
+                min={todayStr}
+                max={maxBookingDateStr}
                 className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
                 style={{ ...inputStyle, width: 160 }}
               />
@@ -567,13 +613,13 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
             )}
 
             {/* Summary of all blocked slots */}
-            {blockedSlotRecords.length > 0 && (
+            {visibleBlockedSlotRecords.length > 0 && (
               <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(0,0,0,0.07)" }}>
                 <p className="text-slate-800 text-xs font-semibold font-sans uppercase tracking-wide mb-2">
                   Wszystkie zablokowane godziny
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {blockedSlotRecords
+                  {visibleBlockedSlotRecords
                     .slice()
                     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
                     .map((r) => (
@@ -625,6 +671,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                     setBlockedDateError("")
                   }}
                   min={todayStr}
+                  max={maxBookingDateStr}
                   className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
                   style={{ ...inputStyle, width: 160 }}
                 />
@@ -641,6 +688,7 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                     setBlockedDateError("")
                   }}
                   min={newBlockedDateFrom || todayStr}
+                  max={maxBookingDateStr}
                   className="rounded-xl px-3 py-2 text-sm font-sans transition-colors"
                   style={{ ...inputStyle, width: 160 }}
                 />
@@ -672,13 +720,13 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
             )}
 
             {/* Blocked date list */}
-            {blockedDates.length === 0 ? (
+            {visibleBlockedDates.length === 0 ? (
               <p className="text-slate-800 text-xs font-sans italic py-3 text-center">
                 Brak zablokowanych dni
               </p>
             ) : (
               <ul className="flex flex-col gap-1.5">
-                {blockedDates
+                {visibleBlockedDates
                   .slice()
                   .sort((a, b) => a.date.localeCompare(b.date))
                   .map((b) => (

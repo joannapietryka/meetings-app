@@ -13,13 +13,8 @@ export interface Task {
 // Calendar constants
 export const CALENDAR_START_HOUR = 8   // 8am (Friday starts at 8:00)
 export const CALENDAR_END_HOUR = 21    // 9pm (Wed last session ends at 20:05)
-export const SLOT_MINUTES = 15         // 15-min grid aligns with all slot times (10:15, 14:45 etc.)
-export const TOTAL_SLOTS = ((CALENDAR_END_HOUR - CALENDAR_START_HOUR) * 60) / SLOT_MINUTES // 52
-export const SLOT_HEIGHT_PX = 20       // px per 15-min slot
 
 export const SESSION_DURATION = 50     // all sessions are 50 minutes
-
-export const SLOT_ROW_HEIGHT = 64      // px per session slot row (legacy, kept for compatibility)
 
 // Time-based grid constants — 1.5 px per minute, 50-min session = 75 px
 export const PX_PER_MINUTE = 1.5
@@ -33,11 +28,6 @@ export const DAY_SLOTS: Record<number, string[]> = {
   4: ["09:00", "10:15", "11:30", "13:30", "14:45", "16:00", "18:00", "19:00"],
   5: ["08:00", "09:00", "10:00", "11:15"],
 }
-
-// Sorted union of every slot across all weekdays — drives the shared grid row layout
-export const ALL_WEEK_SLOTS: string[] = Array.from(
-  new Set(Object.values(DAY_SLOTS).flat())
-).sort()
 
 export const CATEGORY_LABELS: Record<TaskCategory, string> = {
   w_gabinecie: "W gabinecie",
@@ -63,5 +53,3 @@ export const FALLBACK_CATEGORY_COLORS = {
   border: "rgba(0, 0, 0, 0.1)",
   dot: "#9ca3af",
 }
-
-export const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
