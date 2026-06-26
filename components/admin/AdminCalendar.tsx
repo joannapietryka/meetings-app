@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState, useEffect } from "react"
 import { addDays, addHours, addMonths, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
 import { pl } from "date-fns/locale"
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban, Settings } from "lucide-react"
@@ -21,7 +21,8 @@ import {
   resolveInCabinetWeekdaysForDate,
   type InCabinetDayRecord,
 } from "@/lib/in-cabinet-days"
-import { getCategoryForDate } from "@/lib/visit-category"
+import { getAdminCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
+import { snapTimeToFullHour } from "@/lib/time-options"
 import { DayColumn } from "@/components/calendar/DayColumn"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
@@ -35,6 +36,7 @@ type Meeting = {
   duration?: number
   userId?: string
   userEmail?: string
+  userPhone?: string
   createdBy?: "admin" | "guest" | string
   createdAt?: string
   status?: "confirmed" | "not_confirmed" | string
@@ -76,10 +78,15 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
   const maxWeekStart = startOfWeek(maxBookingDate, { weekStartsOn: 1 })
 
   const [weekStart, setWeekStart] = useState(() => currentWeekStart)
+  const [saturdayExpanded, setSaturdayExpanded] = useState(false)
   const [modalConfig, setModalConfig] = useState<{ date: string; time?: string } | null>(null)
   const [editing, setEditing] = useState<Meeting | null>(null)
   const draggingId = useRef<string | null>(null)
   const dragOffsetY = useRef<number>(0)
+
+  useEffect(() => {
+    setSaturdayExpanded(false)
+  }, [weekStart])
 
   const { isLoading, error, data } = db.useQuery({ meetings: {} })
   const meetings = ((data?.meetings ?? []) as Meeting[]) ?? []
@@ -164,10 +171,14 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
 
   const canBookSlotForDay = (dayDate: Date) => (time: string) => {
     if (!isSlotBookable(dayDate, time)) return false
-    const daySlots = resolveSlotsForDate(toDateStr(dayDate), scheduleSlotRecords)
+    const dateStr = toDateStr(dayDate)
+    if (isSaturdayDate(dateStr)) {
+      if (!draggingId.current) return true
+      return !doesConflict(dateStr, time, draggingId.current)
+    }
+    const daySlots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
     if (!daySlots.includes(time)) return false
     if (!draggingId.current) return true
-    const dateStr = toDateStr(dayDate)
     return !doesConflict(dateStr, time, draggingId.current)
   }
 
@@ -177,6 +188,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       !isAfter(startOfDay(d), maxBookingDate);
       d = addDays(d, 1)
     ) {
+      if (isSaturdayDate(toDateStr(d))) continue
       const dateStr = toDateStr(d)
       const daySlots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
       for (const time of daySlots) {
@@ -211,20 +223,33 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
 
     const targetDaySlots = resolveSlotsForDate(targetDate, scheduleSlotRecords)
 
-    if (targetDaySlots.length === 0) {
+    let newTime: string
+    if (targetDaySlots.length === 0 && isSaturdayDate(targetDate)) {
+      const relativeY = e.clientY - dragOffsetY.current - gridTop
+      const minutesFromStart = relativeY / PX_PER_MINUTE
+      const absoluteMinutes = CALENDAR_START_HOUR * 60 + minutesFromStart
+      const h = Math.floor(absoluteMinutes / 60)
+      const m = absoluteMinutes % 60
+      newTime = snapTimeToFullHour(
+        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
+      )
+    } else if (targetDaySlots.length === 0) {
       draggingId.current = null
       return
-    }
-
-    // Snap to the nearest configured slot for that weekday
-    let newTime = targetDaySlots[0]
-    let minDist = Infinity
-    for (const slotTime of targetDaySlots) {
-      const [sh, sm] = slotTime.split(":").map(Number)
-      const dist = Math.abs(sh * 60 + sm - absoluteMinutes)
-      if (dist < minDist) {
-        minDist = dist
-        newTime = slotTime
+    } else {
+      // Snap to the nearest configured slot for that weekday
+      newTime = targetDaySlots[0]
+      let minDist = Infinity
+      const relativeY = e.clientY - dragOffsetY.current - gridTop
+      const minutesFromStart = relativeY / PX_PER_MINUTE
+      const absoluteMinutes = CALENDAR_START_HOUR * 60 + minutesFromStart
+      for (const slotTime of targetDaySlots) {
+        const [sh, sm] = slotTime.split(":").map(Number)
+        const dist = Math.abs(sh * 60 + sm - absoluteMinutes)
+        if (dist < minDist) {
+          minDist = dist
+          newTime = slotTime
+        }
       }
     }
 
@@ -336,8 +361,9 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     time?: string
     duration?: number
     email?: string
+    phone?: string
   }) => {
-    const expectedCategory = getCategoryForDate(
+    const expectedCategory = getAdminCategoryForDate(
       payload.date,
       resolveInCabinetWeekdaysForDate(payload.date, inCabinetDayRecords),
     )
@@ -383,6 +409,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 changeRequestedAt: null,
               }),
           userEmail: payload.email,
+          userPhone: payload.phone ?? null,
           lastEditedBy: "admin",
           updatedAt: nowIso,
         }),
@@ -400,6 +427,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               description: payload.description,
               category: payload.category,
               userEmail: payload.email,
+              userPhone: payload.phone ?? null,
               date: payload.date,
               time: payload.time,
               duration: payload.duration,
@@ -437,6 +465,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           time: payload.time,
           duration: payload.duration,
           userEmail: payload.email,
+          userPhone: payload.phone ?? null,
           createdBy: "admin",
           createdAt,
           lastEditedBy: "admin",
@@ -457,6 +486,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
               time: payload.time,
               duration: payload.duration,
               userEmail: payload.email,
+              userPhone: payload.phone ?? null,
               createdAt,
               lastEditedBy: "admin",
               updatedAt: createdAt,
@@ -484,7 +514,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 before:content-[''] 
                 before:absolute 
                 before:inset-0 
-                before:bg-[url('/images/u-bg.jpg')] 
+                before:bg-[url('/images/x-bg.webp')] 
                 before:bg-cover 
                 before:bg-center 
                 before:opacity-80 
@@ -646,7 +676,9 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             {[0, 1, 2, 3, 4, 5, 6].map((dayOffset) => {
               const dayDate = addDays(weekStart, dayOffset)
               const dateStr = toDateStr(dayDate)
-              const isWeekend = dayOffset >= 5
+              const isSaturday = dayOffset === 5
+              const isSunday = dayOffset === 6
+              const saturdayNarrow = isSaturday && !saturdayExpanded
               const isBeforeToday = isBefore(dayDate, today)
               const isAfterBookingWindow = isAfter(startOfDay(dayDate), maxBookingDate)
               const isLocked = isBeforeToday || isAfterBookingWindow
@@ -654,7 +686,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 <div
                   key={dayOffset}
                   className={
-                    isWeekend
+                    isSunday || saturdayNarrow
                       ? "flex-[0_0_16px] sm:flex-[0_0_36px]"
                       : "flex-1 min-w-[72px] sm:min-w-0"
                   }
@@ -663,7 +695,11 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                     date={dayDate}
                     dateStr={dateStr}
                     tasks={meetings.filter((m) => m.date === dateStr) as any}
-                    isWeekend={isWeekend}
+                    isWeekend={isSunday}
+                    saturdayAdminMode={isSaturday}
+                    saturdayCollapsed={saturdayNarrow}
+                    onSaturdayExpand={() => setSaturdayExpanded(true)}
+                    onSaturdayCollapse={() => setSaturdayExpanded(false)}
                     isLocked={isLocked}
                     isBlocked={blockedDateSet.has(dateStr)}
                     blockedTimes={blockedSlotMap.get(dateStr)}
@@ -674,7 +710,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                     onDelete={handleDelete}
                     onAddTask={(date, time) => setModalConfig({ date, time })}
                     onWeekendHover={
-                      isWeekend && canGoNext
+                      isSunday && canGoNext
                         ? () => {
                             if (canGoNext) setWeekStart((w) => addWeeks(w, 1))
                           }
@@ -695,6 +731,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
 
       {modalConfig !== null && (
         <AddTaskModal
+          key={`${editing?.id ?? "new"}-${modalConfig.date}-${modalConfig.time ?? ""}`}
           defaultDate={modalConfig.date}
           defaultTime={modalConfig.time}
           existingTasks={meetings as any}
@@ -704,8 +741,12 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           initialCategory={editing?.category}
           editingTaskId={editing?.id}
           initialEmail={editing?.userEmail}
+          initialPhone={editing?.userPhone}
           showEmailField
+          showPhoneField
+          requirePhone={false}
           autoCategoryFromDate
+          allowSaturdayDates
           inCabinetDayRecords={inCabinetDayRecords}
           onClose={() => {
             setModalConfig(null)

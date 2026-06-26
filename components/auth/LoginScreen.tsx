@@ -158,7 +158,7 @@ export function LoginScreen() {
         before:content-['']
         before:absolute
         before:inset-0
-        before:bg-[url('/images/rose-bg.jpg')]
+        before:bg-[url('/images/x-bg.webp')]
         before:bg-cover
         before:bg-center
         before:opacity-80

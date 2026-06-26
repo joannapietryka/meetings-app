@@ -74,6 +74,50 @@ describe("AddTaskModal", () => {
       expect(screen.getByRole("heading", { name: /nowa wizyta/i })).toBeInTheDocument()
       expect(screen.getByPlaceholderText(/anna kowalska/i)).toHaveValue("Jan Kowalski")
     })
+
+    it("prefills phone from prefillPhone when showPhoneField is set", () => {
+      renderModal({ showPhoneField: true, prefillPhone: "500123456" })
+      expect(screen.getByLabelText(/numer telefonu/i)).toHaveValue("500123456")
+    })
+  })
+
+  describe("phone validation", () => {
+    it("shows error for invalid phone and does not call onAdd", async () => {
+      const onAdd = jest.fn()
+      renderModal({ showPhoneField: true, onAdd })
+      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await userEvent.type(screen.getByLabelText(/numer telefonu/i), "123")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(screen.getByText(/poprawny numer telefonu/i)).toBeInTheDocument()
+      expect(onAdd).not.toHaveBeenCalled()
+    })
+
+    it("passes formatted phone to onAdd for valid guest booking", async () => {
+      const onAdd = jest.fn()
+      renderModal({ showPhoneField: true, onAdd })
+      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await userEvent.type(screen.getByLabelText(/numer telefonu/i), "500 123 456")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Jan Kowalski",
+          phone: "+48500123456",
+        }),
+      )
+    })
+
+    it("allows empty phone when requirePhone is false", async () => {
+      const onAdd = jest.fn()
+      renderModal({ showPhoneField: true, requirePhone: false, onAdd })
+      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Jan Kowalski",
+          phone: undefined,
+        }),
+      )
+    })
   })
 
   describe("name validation", () => {
@@ -183,6 +227,42 @@ describe("AddTaskModal", () => {
 
         expect(screen.getByText("Online")).toBeInTheDocument()
         expect(screen.queryByText("W gabinecie")).not.toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("admin mode includes Saturday with hour input and 5-min minute select", () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date("2026-06-01T12:00:00"))
+
+      try {
+        renderModal({
+          defaultDate: "2026-06-06",
+          allowSaturdayDates: true,
+          showEmailField: true,
+          autoCategoryFromDate: true,
+          inCabinetDayRecords: [{ inCabinetWeekdays: "[3]", effectiveFrom: "2000-01-01" }],
+          maxBookableDate: new Date("2026-06-30"),
+        })
+
+        expect(screen.getByText(/dni robocze i sobota/i)).toBeInTheDocument()
+        expect(screen.getByText("Online")).toBeInTheDocument()
+        expect(screen.getByText(/sobota — wizyta online/i)).toBeInTheDocument()
+
+        const dateSelect = screen.getAllByRole("combobox")[0] as HTMLSelectElement
+        expect(
+          within(dateSelect).getByRole("option", { name: /sob\., 6 cze/i }),
+        ).toBeInTheDocument()
+
+        const hourInput = screen.getByRole("textbox", { name: /godzina/i })
+        expect(hourInput).toHaveAttribute("inputmode", "numeric")
+
+        const minuteSelect = screen.getByRole("combobox", { name: /minuty/i })
+        expect(within(minuteSelect).getByRole("option", { name: "00" })).toBeInTheDocument()
+        expect(within(minuteSelect).getByRole("option", { name: "05" })).toBeInTheDocument()
+        expect(within(minuteSelect).queryByRole("option", { name: "01" })).not.toBeInTheDocument()
+        expect(within(minuteSelect).queryByRole("option", { name: "02" })).not.toBeInTheDocument()
       } finally {
         jest.useRealTimers()
       }

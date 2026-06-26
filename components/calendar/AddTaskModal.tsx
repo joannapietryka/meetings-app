@@ -27,7 +27,10 @@ import {
   resolveInCabinetWeekdaysForDate,
   type InCabinetDayRecord,
 } from "@/lib/in-cabinet-days"
-import { getCategoryForDate } from "@/lib/visit-category"
+import { getAdminCategoryForDate, getCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
+import { generateFiveMinuteTimeOptions, snapTimeToFullHour } from "@/lib/time-options"
+import { TimePickerInput } from "@/components/calendar/TimePickerInput"
+import { formatPhoneForStorage, isValidPhoneNumber } from "@/lib/phone"
 
 interface AddTaskModalProps {
   defaultDate: string
@@ -42,6 +45,7 @@ interface AddTaskModalProps {
     time?: string
     duration?: number
     email?: string
+    phone?: string
   }) => void | boolean | Promise<void | boolean>
   initialTitle?: string
   /** Pre-fills the patient name for a new booking only (e.g. from browser cache). Ignored when `editingTaskId` is set. */
@@ -51,6 +55,13 @@ interface AddTaskModalProps {
   editingTaskId?: string
   showEmailField?: boolean
   initialEmail?: string
+  /** Guest booking: show patient phone number field. */
+  showPhoneField?: boolean
+  /** When false, phone may be left empty (admin booking). Defaults to true. */
+  requirePhone?: boolean
+  initialPhone?: string
+  /** Pre-fills phone for a new booking only (e.g. from browser cache). Ignored when `editingTaskId` is set. */
+  prefillPhone?: string
   /** Versioned schedule from DB — resolved per date. */
   scheduleRecords?: ScheduleSlotRecord[]
   /** @deprecated Use scheduleRecords. Falls back when scheduleRecords is omitted. */
@@ -65,6 +76,8 @@ interface AddTaskModalProps {
   autoCategoryFromDate?: boolean
   /** Versioned in-cabinet weekday settings when autoCategoryFromDate is set. */
   inCabinetDayRecords?: InCabinetDayRecord[]
+  /** Admin only: include Saturdays with free-form time input. */
+  allowSaturdayDates?: boolean
 }
 
 const CATEGORIES: { value: TaskCategory; label: string }[] = [
@@ -81,30 +94,50 @@ function fitsInDay(time: string): boolean {
   return endMinutes <= CALENDAR_END_HOUR * 60
 }
 
-/** Generate available dates: up to maxDate, weekdays only, that have at least one slot. */
+/** Generate available dates: up to maxDate; weekdays with slots, optionally Saturdays (admin). */
 function generateAvailableDates(
   resolveSlots: SlotsResolver,
   maxDate: Date,
+  allowSaturdayDates = false,
 ): { date: Date; dateStr: string; label: string }[] {
   const today = startOfDay(new Date())
   const dates: { date: Date; dateStr: string; label: string }[] = []
 
   let current = today
   while (!isAfter(current, maxDate)) {
-    if (!isWeekend(current)) {
-      const dateStr = format(current, "yyyy-MM-dd")
-      if (resolveSlots(dateStr).length > 0) {
-        dates.push({
-          date: current,
-          dateStr,
-          label: format(current, "EEE, d MMM", { locale: pl }),
-        })
-      }
+    const dateStr = format(current, "yyyy-MM-dd")
+    const day = current.getDay()
+    if (allowSaturdayDates && day === 6) {
+      dates.push({
+        date: current,
+        dateStr,
+        label: format(current, "EEE, d MMM", { locale: pl }),
+      })
+    } else if (!isWeekend(current) && resolveSlots(dateStr).length > 0) {
+      dates.push({
+        date: current,
+        dateStr,
+        label: format(current, "EEE, d MMM", { locale: pl }),
+      })
     }
     current = addDays(current, 1)
   }
 
   return dates
+}
+
+function resolveCategoryForModal(
+  dateStr: string,
+  inCabinetWeekdays: number[],
+  autoCategoryFromDate: boolean,
+  allowSaturdayDates: boolean,
+  fallback: TaskCategory,
+): TaskCategory {
+  if (!autoCategoryFromDate) return fallback
+  if (allowSaturdayDates) {
+    return getAdminCategoryForDate(dateStr, inCabinetWeekdays)
+  }
+  return getCategoryForDate(dateStr, inCabinetWeekdays)
 }
 
 export function AddTaskModal({
@@ -120,6 +153,10 @@ export function AddTaskModal({
   editingTaskId,
   showEmailField,
   initialEmail,
+  showPhoneField,
+  requirePhone = true,
+  initialPhone,
+  prefillPhone,
   scheduleRecords,
   daySlots,
   disabledDates,
@@ -127,6 +164,7 @@ export function AddTaskModal({
   maxBookableDate: maxBookableDateProp,
   autoCategoryFromDate = false,
   inCabinetDayRecords,
+  allowSaturdayDates = false,
 }: AddTaskModalProps) {
   const resolveInCabinetWeekdays = useMemo(
     () => (dateStr: string) =>
@@ -148,10 +186,11 @@ export function AddTaskModal({
     [today, maxBookableDateProp],
   )
   const availableDates = useMemo(
-    () => generateAvailableDates(resolveSlots, maxBookingDate).filter(
-      (d) => !disabledDates?.has(d.dateStr)
-    ),
-    [resolveSlots, maxBookingDate, disabledDates],
+    () =>
+      generateAvailableDates(resolveSlots, maxBookingDate, allowSaturdayDates).filter(
+        (d) => !disabledDates?.has(d.dateStr),
+      ),
+    [resolveSlots, maxBookingDate, disabledDates, allowSaturdayDates],
   )
 
   const isSlotWithinBookingWindow = (dateStr: string, slot: string) => {
@@ -175,29 +214,48 @@ export function AddTaskModal({
 
   // Ensure default date is valid (weekday within range)
   const validDefaultDate = useMemo(() => {
-    const found = availableDates.find(d => d.dateStr === defaultDate)
-    return found ? defaultDate : availableDates[0]?.dateStr ?? defaultDate
-  }, [defaultDate, availableDates])
+    const found = availableDates.find((d) => d.dateStr === defaultDate)
+    if (found) return defaultDate
+    if (
+      allowSaturdayDates &&
+      isSaturdayDate(defaultDate) &&
+      !isAfter(startOfDay(parseISO(defaultDate)), maxBookingDate)
+    ) {
+      return defaultDate
+    }
+    return availableDates[0]?.dateStr ?? defaultDate
+  }, [defaultDate, availableDates, allowSaturdayDates, maxBookingDate])
 
   const [title, setTitle] = useState(() => (initialTitle ?? prefillTitle ?? "").trim())
   const [description, setDescription] = useState(initialDescription ?? "")
   const [category, setCategory] = useState<TaskCategory>(() =>
-    autoCategoryFromDate
-      ? getCategoryForDate(validDefaultDate, resolveInCabinetWeekdays(validDefaultDate))
-      : (initialCategory ?? "w_gabinecie"),
+    resolveCategoryForModal(
+      validDefaultDate,
+      resolveInCabinetWeekdays(validDefaultDate),
+      autoCategoryFromDate,
+      allowSaturdayDates,
+      initialCategory ?? "w_gabinecie",
+    ),
   )
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
   const [email, setEmail] = useState(initialEmail ?? "")
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [phone, setPhone] = useState(() => (initialPhone ?? prefillPhone ?? "").trim())
+  const [phoneError, setPhoneError] = useState<string | null>(null)
 
   // Initialise time: prefer defaultTime if it's a valid slot for the date, else pick first slot
   const [time, setTime] = useState(() => {
+    if (allowSaturdayDates && isSaturdayDate(validDefaultDate)) {
+      return defaultTime ? snapTimeToFullHour(defaultTime) : ""
+    }
     const dayTimeSlots = resolveSlots(validDefaultDate)
     if (defaultTime && dayTimeSlots.includes(defaultTime)) return defaultTime
     return dayTimeSlots[0] ?? ""
   })
+
+  const isSaturdaySelected = isSaturdayDate(selectedDate)
 
   const isValidEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
@@ -205,7 +263,11 @@ export function AddTaskModal({
   // blocked start times per date (exact meeting start times of other sessions)
   const blockedSlotsByDate = useMemo(() => {
     const map = new Map<string, Set<string>>()
-    for (const { dateStr } of availableDates) {
+    const dateStrs = new Set(availableDates.map((d) => d.dateStr))
+    if (allowSaturdayDates && isSaturdayDate(selectedDate)) {
+      dateStrs.add(selectedDate)
+    }
+    for (const dateStr of dateStrs) {
       const blocked = new Set<string>()
       existingTasks
         .filter((t) => t.date === dateStr)
@@ -219,7 +281,7 @@ export function AddTaskModal({
       map.set(dateStr, blocked)
     }
     return map
-  }, [availableDates, existingTasks, isEditing, editingTaskId])
+  }, [availableDates, existingTasks, isEditing, editingTaskId, allowSaturdayDates, selectedDate])
 
   const blockedSlots = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
   const allSlotsForSelectedDate = useMemo(
@@ -249,12 +311,62 @@ export function AddTaskModal({
   const freeSlotsForSelectedDate = freeSlotsByDate.get(selectedDate) ?? []
   const hasFreeSlotsForSelectedDate = freeSlotsForSelectedDate.length > 0
 
+  const saturdayTimeOptions = useMemo(() => generateFiveMinuteTimeOptions(), [])
+
+  const freeSaturdaySlots = useMemo(() => {
+    if (!isSaturdaySelected) return []
+    const blocked = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
+    return saturdayTimeOptions.filter(
+      (slot) =>
+        fitsInDay(slot) &&
+        isSlotWithinBookingWindow(selectedDate, slot) &&
+        !isAdminSlotBlocked(selectedDate, slot) &&
+        !isSlotConflicting(slot, blocked),
+    )
+  }, [
+    isSaturdaySelected,
+    selectedDate,
+    saturdayTimeOptions,
+    blockedSlotsByDate,
+    now,
+    maxBookingDate,
+    adminBlockedSlots,
+  ])
+
+  const isSaturdayTimeValid = useMemo(() => {
+    if (!isSaturdaySelected || !time) return false
+    if (!fitsInDay(time)) return false
+    if (!isSlotWithinBookingWindow(selectedDate, time)) return false
+    if (isAdminSlotBlocked(selectedDate, time)) return false
+    if (isSlotConflicting(time, blockedSlots)) return false
+    return true
+  }, [isSaturdaySelected, time, selectedDate, blockedSlots, now, maxBookingDate, adminBlockedSlots])
+
+  const canSubmitTime = isSaturdaySelected ? isSaturdayTimeValid : hasFreeSlotsForSelectedDate
+
   // Auto-prefill date+time when opening a new booking: prefer calendar-chosen day, else first available.
   const didInitialPrefill = useRef(false)
   useEffect(() => {
     if (isEditing) return
     if (defaultTime) return
     if (didInitialPrefill.current) return
+
+    if (allowSaturdayDates && isSaturdayDate(defaultDate)) {
+      setSelectedDate(defaultDate)
+      const firstFree = saturdayTimeOptions.find(
+        (slot) =>
+          fitsInDay(slot) &&
+          isSlotWithinBookingWindow(defaultDate, slot) &&
+          !isAdminSlotBlocked(defaultDate, slot) &&
+          !isSlotConflicting(
+            slot,
+            blockedSlotsByDate.get(defaultDate) ?? new Set<string>(),
+          ),
+      )
+      if (firstFree) setTime(firstFree)
+      didInitialPrefill.current = true
+      return
+    }
 
     const tryPrefillDate = (dateStr: string): boolean => {
       const freeSlots = freeSlotsByDate.get(dateStr) ?? []
@@ -278,12 +390,24 @@ export function AddTaskModal({
       }
     }
     didInitialPrefill.current = true
-  }, [isEditing, defaultTime, defaultDate, availableDates, freeSlotsByDate])
+  }, [isEditing, defaultTime, defaultDate, availableDates, freeSlotsByDate, allowSaturdayDates, saturdayTimeOptions, blockedSlotsByDate])
 
   // When date changes, validate current time is still a valid slot for the new day
+  const prevSelectedDateRef = useRef<string | null>(null)
   useEffect(() => {
     if (isEditing) return
     if (!selectedDate) return
+
+    const dateChanged =
+      prevSelectedDateRef.current !== null && prevSelectedDateRef.current !== selectedDate
+    prevSelectedDateRef.current = selectedDate
+    if (!dateChanged) return
+
+    if (allowSaturdayDates && isSaturdayDate(selectedDate)) {
+      if (time && freeSaturdaySlots.includes(time)) return
+      setTime(freeSaturdaySlots[0] ?? "")
+      return
+    }
 
     if (!freeSlotsForSelectedDate.length) {
       if (time !== "") setTime("")
@@ -293,12 +417,38 @@ export function AddTaskModal({
     if (time && freeSlotsForSelectedDate.includes(time)) return
 
     setTime(freeSlotsForSelectedDate[0] ?? "")
-  }, [selectedDate, isEditing, freeSlotsForSelectedDate, time])
+  }, [selectedDate, isEditing, freeSlotsForSelectedDate, freeSaturdaySlots, time, allowSaturdayDates])
 
   useEffect(() => {
     if (!autoCategoryFromDate || !selectedDate) return
-    setCategory(getCategoryForDate(selectedDate, resolveInCabinetWeekdays(selectedDate)))
-  }, [autoCategoryFromDate, selectedDate, resolveInCabinetWeekdays])
+    setCategory(
+      resolveCategoryForModal(
+        selectedDate,
+        resolveInCabinetWeekdays(selectedDate),
+        autoCategoryFromDate,
+        allowSaturdayDates,
+        "online",
+      ),
+    )
+  }, [autoCategoryFromDate, selectedDate, resolveInCabinetWeekdays, allowSaturdayDates])
+
+  const dateSelectOptions = useMemo(() => {
+    const options = [...availableDates]
+    if (
+      allowSaturdayDates &&
+      selectedDate &&
+      !options.some((d) => d.dateStr === selectedDate)
+    ) {
+      const d = parseISO(selectedDate)
+      options.push({
+        date: d,
+        dateStr: selectedDate,
+        label: format(d, "EEE, d MMM", { locale: pl }),
+      })
+      options.sort((a, b) => a.dateStr.localeCompare(b.dateStr))
+    }
+    return options
+  }, [availableDates, allowSaturdayDates, selectedDate])
 
   const wouldConflict = useMemo(() => {
     if (!time) return false
@@ -308,10 +458,17 @@ export function AddTaskModal({
   const dateEnabledMap = useMemo(() => {
     const map = new Map<string, boolean>()
     for (const { dateStr } of availableDates) {
-      map.set(dateStr, (freeSlotsByDate.get(dateStr) ?? []).length > 0)
+      if (allowSaturdayDates && isSaturdayDate(dateStr)) {
+        map.set(dateStr, true)
+      } else {
+        map.set(dateStr, (freeSlotsByDate.get(dateStr) ?? []).length > 0)
+      }
+    }
+    if (allowSaturdayDates && selectedDate && isSaturdayDate(selectedDate)) {
+      map.set(selectedDate, true)
     }
     return map
-  }, [availableDates, freeSlotsByDate])
+  }, [availableDates, freeSlotsByDate, allowSaturdayDates, selectedDate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -333,13 +490,34 @@ export function AddTaskModal({
       }
     }
 
+    if (showPhoneField) {
+      const trimmed = phone.trim()
+      if (!trimmed && requirePhone) {
+        setPhoneError("Proszę wpisać numer telefonu.")
+        return
+      }
+      if (trimmed && !isValidPhoneNumber(trimmed)) {
+        setPhoneError("Proszę wpisać poprawny numer telefonu (Polska lub Belgia, np. +48… lub +32…).")
+        return
+      }
+    }
+
+    if (!time) {
+      alert("Proszę wybrać godzinę wizyty.")
+      return
+    }
+
     if (!fitsInDay(time)) {
       alert(`Wizyta kończy się po ${CALENDAR_END_HOUR}:00. Proszę wybrać wcześniejszą godzinę.`)
       return
     }
 
-    if (!time || !hasFreeSlotsForSelectedDate) {
-      alert("Brak wolnych terminów w tym dniu.")
+    if (!canSubmitTime) {
+      alert(
+        isSaturdaySelected
+          ? "Wybrana godzina jest niedostępna lub koliduje z inną wizytą."
+          : "Brak wolnych terminów w tym dniu.",
+      )
       return
     }
 
@@ -350,9 +528,14 @@ export function AddTaskModal({
     setIsSubmitting(true)
     setNameError(null)
     setEmailError(null)
-    const resolvedCategory = autoCategoryFromDate
-      ? getCategoryForDate(selectedDate, resolveInCabinetWeekdays(selectedDate))
-      : category
+    setPhoneError(null)
+    const resolvedCategory = resolveCategoryForModal(
+      selectedDate,
+      resolveInCabinetWeekdays(selectedDate),
+      autoCategoryFromDate,
+      allowSaturdayDates,
+      category,
+    )
     let result: void | boolean
     try {
       result = await onAdd({
@@ -363,6 +546,10 @@ export function AddTaskModal({
         time: time || undefined,
         duration: SESSION_DURATION,
         email: showEmailField ? email.trim() : undefined,
+        phone:
+          showPhoneField && phone.trim()
+            ? formatPhoneForStorage(phone.trim())
+            : undefined,
       })
     } catch {
       setIsSubmitting(false)
@@ -501,13 +688,47 @@ export function AddTaskModal({
             </div>
           )}
 
+          {showPhoneField && (
+            <div>
+              <label
+                htmlFor="task-phone"
+                className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+              >
+                Numer telefonu{" "}
+                {!requirePhone && (
+                  <span className="normal-case font-normal text-slate-600">(opcjonalnie)</span>
+                )}
+              </label>
+              <input
+                id="task-phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value)
+                  if (phoneError) setPhoneError(null)
+                }}
+                placeholder="np. +48 500 123 456 lub 0470 12 34 56"
+                className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
+                style={inputStyle}
+              />
+              {phoneError && (
+                <p className="mt-1 text-[11px] text-red-600 font-sans">
+                  {phoneError}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Date selector */}
           <div>
             <label
               htmlFor="task-date"
               className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
-              Data (dni robocze)
+              Data {allowSaturdayDates ? "(dni robocze i sobota)" : "(dni robocze)"}
             </label>
             <select
               id="task-date"
@@ -517,7 +738,7 @@ export function AddTaskModal({
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans cursor-pointer"
               style={{ ...inputStyle, WebkitAppearance: "none" }}
             >
-              {availableDates.map(({ dateStr, label }) => (
+              {dateSelectOptions.map(({ dateStr, label }) => (
                 <option key={dateStr} value={dateStr} disabled={!dateEnabledMap.get(dateStr)}>
                   {label}
                 </option>
@@ -525,7 +746,7 @@ export function AddTaskModal({
             </select>
           </div>
 
-          {/* Time selector — shows only the psychologist slots for the selected day */}
+          {/* Time selector */}
           <div>
             <label
               htmlFor="task-time"
@@ -533,6 +754,16 @@ export function AddTaskModal({
             >
               Godzina <span className="normal-case font-normal text-slate-600">(wizyta 50-min)</span>
             </label>
+            {isSaturdaySelected && allowSaturdayDates ? (
+              <TimePickerInput
+                id="task-time"
+                name="time"
+                value={time}
+                onChange={setTime}
+                inputStyle={inputStyle}
+                availableTimes={new Set(freeSaturdaySlots)}
+              />
+            ) : (
             <select
               id="task-time"
               name="time"
@@ -555,7 +786,20 @@ export function AddTaskModal({
                 )
               })}
             </select>
-            {!hasFreeSlotsForSelectedDate && (
+            )}
+            {isSaturdaySelected && allowSaturdayDates && time && !isSaturdayTimeValid && (
+              <div
+                className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold font-sans"
+                style={{
+                  background: "rgba(254,226,226,0.25)",
+                  border: "1.5px dashed rgba(239,68,68,0.3)",
+                  color: "#b91c1c",
+                }}
+              >
+                godzina niedostępna lub koliduje z inną wizytą
+              </div>
+            )}
+            {!isSaturdaySelected && !hasFreeSlotsForSelectedDate && (
               <div
                 className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold font-sans"
                 style={{
@@ -605,7 +849,9 @@ export function AddTaskModal({
                   {CATEGORY_LABELS[category]}
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500 font-sans leading-relaxed">
-                  Ustalane automatycznie na podstawie wybranej daty.
+                  {isSaturdaySelected && allowSaturdayDates
+                    ? "Sobota — wizyta online (wyjątkowa)."
+                    : "Ustalane automatycznie na podstawie wybranej daty."}
                 </p>
               </div>
             ) : (
@@ -660,7 +906,7 @@ export function AddTaskModal({
           {/* Submit */}
           <button
             type="submit"
-            disabled={(!isEditing && wouldConflict) || isSubmitting || !hasFreeSlotsForSelectedDate}
+            disabled={(!isEditing && wouldConflict) || isSubmitting || !canSubmitTime}
             className="w-full py-3 rounded-xl font-bold font-sans text-sm transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             style={{
               backgroundColor: "#0C115B",

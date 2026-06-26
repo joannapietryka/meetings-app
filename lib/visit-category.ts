@@ -2,9 +2,6 @@ import { parseISO } from "date-fns"
 import type { TaskCategory } from "@/lib/calendar-types"
 import { DEFAULT_IN_CABINET_WEEKDAYS } from "@/lib/in-cabinet-days"
 
-/** @deprecated Use DEFAULT_IN_CABINET_WEEKDAYS */
-export const DEFAULT_IN_CABINET_WEEKDAY = DEFAULT_IN_CABINET_WEEKDAYS[0]
-
 export const WORK_WEEKDAYS: { day: number; label: string }[] = [
   { day: 1, label: "Poniedziałek" },
   { day: 2, label: "Wtorek" },
@@ -26,6 +23,10 @@ export function formatInCabinetWeekdaysLabel(weekdays: number[]): string {
     .join(", ")
 }
 
+export function isSaturdayDate(dateStr: string): boolean {
+  return parseISO(dateStr).getDay() === 6
+}
+
 export function getCategoryForDate(
   dateStr: string,
   inCabinetWeekdays: number[] = DEFAULT_IN_CABINET_WEEKDAYS,
@@ -33,4 +34,13 @@ export function getCategoryForDate(
   return inCabinetWeekdays.includes(parseISO(dateStr).getDay())
     ? "w_gabinecie"
     : "online"
+}
+
+/** Admin calendar: Saturday exceptional visits are always online. */
+export function getAdminCategoryForDate(
+  dateStr: string,
+  inCabinetWeekdays: number[] = DEFAULT_IN_CABINET_WEEKDAYS,
+): TaskCategory {
+  if (isSaturdayDate(dateStr)) return "online"
+  return getCategoryForDate(dateStr, inCabinetWeekdays)
 }

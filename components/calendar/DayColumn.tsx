@@ -3,6 +3,7 @@
 import { useState, useRef } from "react"
 import { format, isToday } from "date-fns"
 import { pl } from "date-fns/locale"
+import { Plus, ChevronLeft } from "lucide-react"
 import type { Task } from "@/lib/calendar-types"
 import {
   CALENDAR_START_HOUR,
@@ -11,6 +12,7 @@ import {
   GRID_TOTAL_HEIGHT,
   SESSION_DURATION,
 } from "@/lib/calendar-types"
+import { snapTimeToFullHour } from "@/lib/time-options"
 import { TaskCard } from "./TaskCard"
 
 interface DayColumnProps {
@@ -32,6 +34,12 @@ interface DayColumnProps {
   onAddTask: (dateStr: string, time?: string) => void
   onWeekendHover?: () => void
   onClickTask?: (task: Task) => void
+  /** Admin-only: Saturday column with free-form booking (no schedule slots). */
+  saturdayAdminMode?: boolean
+  /** Collapsed Saturday strip with expand control (admin). */
+  saturdayCollapsed?: boolean
+  onSaturdayExpand?: () => void
+  onSaturdayCollapse?: () => void
 }
 
 /** Convert "HH:MM" to pixel offset from the top of the grid. */
@@ -62,6 +70,10 @@ export function DayColumn({
   onAddTask,
   onWeekendHover,
   onClickTask,
+  saturdayAdminMode = false,
+  saturdayCollapsed = false,
+  onSaturdayExpand,
+  onSaturdayCollapse,
 }: DayColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -116,18 +128,86 @@ export function DayColumn({
     )
   }
 
+  // Saturday (admin): collapsed strip with + to expand
+  if (saturdayAdminMode && saturdayCollapsed) {
+    const meetingCount = tasks.filter((t) => t.time).length
+    return (
+      <div className="flex flex-col min-w-0" style={{ width: "100%" }}>
+        <div
+          className="py-1 px-0.5 sm:py-2 sm:px-2 rounded-md sm:rounded-xl text-center"
+          style={{
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          <p className="text-slate-600 text-[7px] sm:text-[9px] font-semibold uppercase tracking-wide sm:tracking-widest font-sans leading-none">
+            <span className="sm:hidden">{dayName.charAt(0)}</span>
+            <span className="hidden sm:inline">{dayName}</span>
+          </p>
+          <p className="text-slate-600 text-[10px] sm:text-sm font-bold font-sans leading-tight">{dayNum}</p>
+        </div>
+        <div
+          className="flex-1 mt-1 sm:mt-2 rounded-md sm:rounded-xl flex flex-col items-center justify-center gap-1"
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            border: "1px dashed rgba(0,0,0,0.1)",
+            minHeight: GRID_TOTAL_HEIGHT,
+          }}
+        >
+          {meetingCount > 0 && (
+            <span className="text-[9px] font-semibold font-sans text-slate-600 tabular-nums">
+              {meetingCount}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onSaturdayExpand}
+            className="flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-lg transition-all hover:bg-white/40 hover:-translate-y-0.5 active:translate-y-0"
+            style={{
+              background: "rgba(12,17,91,0.12)",
+              border: "1px solid rgba(12,17,91,0.2)",
+              color: "#0C115B",
+            }}
+            aria-label="Rozwiń sobotę"
+          >
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   const timedTasks = tasks.filter((t) => t.time)
   const untimedTasks = tasks.filter((t) => !t.time)
 
   // Slots with no existing booking → rendered as "Available" ghost blocks
   const bookedTimes = new Set(timedTasks.map((t) => t.time))
-  const availableSlots = scheduledSlots.filter((slot) => !bookedTimes.has(slot))
+  const availableSlots = saturdayAdminMode
+    ? []
+    : scheduledSlots.filter((slot) => !bookedTimes.has(slot))
+
+  const handleSaturdayGridClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!saturdayAdminMode || isLocked) return
+    if ((e.target as HTMLElement).closest("[data-task-card]")) return
+
+    const gridTop = gridRef.current?.getBoundingClientRect().top ?? 0
+    const relativeY = e.clientY - gridTop
+    const minutesFromStart = relativeY / PX_PER_MINUTE
+    const absoluteMinutes = CALENDAR_START_HOUR * 60 + minutesFromStart
+    const h = Math.floor(absoluteMinutes / 60)
+    const m = absoluteMinutes % 60
+    const clickedTime = snapTimeToFullHour(
+      `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
+    )
+    onAddTask(dateStr, clickedTime)
+  }
 
   return (
     <div className={`flex flex-col min-w-0 flex-1 ${isLocked ? "opacity-60" : ""}`}>
       {/* Day header */}
       <div
-        className="mb-1 sm:mb-2 py-1.5 px-1.5 sm:py-2 sm:px-3 rounded-lg sm:rounded-xl text-center flex-shrink-0"
+        className="mb-1 sm:mb-2 py-1.5 px-1.5 sm:py-2 sm:px-3 rounded-lg sm:rounded-xl text-center flex-shrink-0 relative"
         style={{
           background: isBlocked
             ? "rgba(254,226,226,0.25)"
@@ -165,6 +245,17 @@ export function DayColumn({
         >
           {dayNum}
         </p>
+        {saturdayAdminMode && onSaturdayCollapse && (
+          <button
+            type="button"
+            onClick={onSaturdayCollapse}
+            className="absolute top-1 right-1 sm:top-1.5 sm:right-1.5 flex items-center justify-center w-5 h-5 rounded-md transition-all hover:bg-white/40"
+            style={{ color: today ? "rgba(255,255,255,0.8)" : "#64748b" }}
+            aria-label="Zwiń sobotę"
+          >
+            <ChevronLeft className="w-3 h-3" />
+          </button>
+        )}
       </div>
 
       {/* Time-based slot grid */}
@@ -188,7 +279,10 @@ export function DayColumn({
                 onDrop(e, dateStr, gridTop)
               }
         }
-        className="relative rounded-lg sm:rounded-xl overflow-hidden transition-all duration-200"
+        onClick={saturdayAdminMode && !isLocked ? handleSaturdayGridClick : undefined}
+        className={`relative rounded-lg sm:rounded-xl overflow-hidden transition-all duration-200 ${
+          saturdayAdminMode && !isLocked ? "cursor-pointer" : ""
+        }`}
         style={{
           height: GRID_TOTAL_HEIGHT,
           background: isDragOver ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.18)",
@@ -274,6 +368,7 @@ export function DayColumn({
               key={task.id}
               className="absolute left-0.5 right-0.5 sm:left-1 sm:right-1"
               style={{ top: topPx, height: taskHeight, zIndex: 10 }}
+              data-task-card
             >
               <TaskCard
                 task={task}

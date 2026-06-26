@@ -57,8 +57,10 @@ function getMonthKey(dateStr: string): string {
 }
 
 const GUEST_DISPLAY_NAME_STORAGE_KEY = "app-meetings:guest-display-name"
+const GUEST_PHONE_STORAGE_KEY = "app-meetings:guest-phone"
 const GUEST_AVAILABILITY_SNAPSHOT_STORAGE_KEY = "app-meetings:guest-availability-snapshot"
 const AVAILABILITY_REQUEST_TIMEOUT_MS = 12000
+const PAST_VISITS_PAGE_SIZE = 5
 
 function readGuestCachedDisplayName(): string | undefined {
   if (typeof window === "undefined") return undefined
@@ -75,6 +77,26 @@ function writeGuestCachedDisplayName(name: string) {
   try {
     const t = name.trim()
     if (t) localStorage.setItem(GUEST_DISPLAY_NAME_STORAGE_KEY, t)
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function readGuestCachedPhone(): string | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    const v = localStorage.getItem(GUEST_PHONE_STORAGE_KEY)?.trim()
+    return v || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function writeGuestCachedPhone(phone: string) {
+  if (typeof window === "undefined") return
+  try {
+    const t = phone.trim()
+    if (t) localStorage.setItem(GUEST_PHONE_STORAGE_KEY, t)
   } catch {
     // ignore quota / private mode
   }
@@ -141,6 +163,7 @@ type Meeting = {
   createdAt?: string
   userId?: string
   userEmail?: string
+  userPhone?: string
   createdBy?: "admin" | "guest" | string
   status?: "confirmed" | "not_confirmed" | string
   previousDate?: string
@@ -155,6 +178,14 @@ function toDateTime(m: Meeting): number {
   const [year, month, day] = m.date.split("-").map(Number)
   const [h, min] = (m.time ?? "00:00").split(":").map(Number)
   return new Date(year, month - 1, day, h, min).getTime()
+}
+
+function meetingEndMs(m: Meeting): number {
+  return toDateTime(m) + (m.duration ?? SESSION_DURATION) * 60 * 1000
+}
+
+function isUpcomingMeeting(m: Meeting, now: Date = new Date()): boolean {
+  return meetingEndMs(m) > now.getTime()
 }
 
 function isDateInBookingWindow(day: Date, today: Date, maxBookingDate: Date): boolean {
@@ -209,13 +240,36 @@ export function GuestDashboard() {
     [bookingSettingsData],
   )
 
+  const now = useMemo(() => new Date(), [])
+  const today = useMemo(() => startOfDay(new Date()), [])
+
   const sortedMeetings = useMemo(
     () => [...myMeetings].sort((a, b) => toDateTime(a) - toDateTime(b)),
     [myMeetings],
   )
 
-  const now = useMemo(() => new Date(), [])
-  const today = useMemo(() => startOfDay(new Date()), [])
+  const upcomingMeetings = useMemo(
+    () => sortedMeetings.filter((m) => isUpcomingMeeting(m, now)),
+    [sortedMeetings, now],
+  )
+
+  const pastMeetings = useMemo(
+    () => sortedMeetings.filter((m) => !isUpcomingMeeting(m, now)).reverse(),
+    [sortedMeetings, now],
+  )
+
+  const [visitsListTab, setVisitsListTab] = useState<"upcoming" | "past">("upcoming")
+  const [pastVisitsVisibleCount, setPastVisitsVisibleCount] = useState(PAST_VISITS_PAGE_SIZE)
+
+  const visiblePastMeetings = useMemo(
+    () => pastMeetings.slice(0, pastVisitsVisibleCount),
+    [pastMeetings, pastVisitsVisibleCount],
+  )
+
+  const displayedMeetings =
+    visitsListTab === "upcoming" ? upcomingMeetings : visiblePastMeetings
+  const hasMorePastMeetings = pastMeetings.length > pastVisitsVisibleCount
+
   const todayStr = useMemo(() => format(today, "yyyy-MM-dd"), [today])
   const inCabinetWeekdaysLabel = useMemo(
     () =>
@@ -362,8 +416,8 @@ export function GuestDashboard() {
   }, [refreshAvailability])
 
   const relevantMeetings = useMemo(
-    () => myMeetings.filter((m) => m.id !== editing?.id),
-    [myMeetings, editing],
+    () => myMeetings.filter((m) => m.id !== editing?.id && isUpcomingMeeting(m, now)),
+    [myMeetings, editing, now],
   )
 
   const disabledDateReasons = useMemo(() => {
@@ -474,12 +528,13 @@ export function GuestDashboard() {
   const meetingsByDate = useMemo(() => {
     const map = new Map<string, Meeting[]>()
     for (const m of myMeetings) {
+      if (!isUpcomingMeeting(m, now)) continue
       const list = map.get(m.date) ?? []
       list.push(m)
       map.set(m.date, list)
     }
     return map
-  }, [myMeetings])
+  }, [myMeetings, now])
 
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(visibleMonth)
@@ -644,7 +699,9 @@ export function GuestDashboard() {
 
   const openDay = async (day: Date) => {
     const dateStr = format(day, "yyyy-MM-dd")
-    const mineOnDay = myMeetings.find((m) => m.date === dateStr)
+    const mineOnDay = myMeetings.find(
+      (m) => m.date === dateStr && isUpcomingMeeting(m, now),
+    )
 
     if (mineOnDay) {
       setEditing(mineOnDay)
@@ -806,7 +863,7 @@ export function GuestDashboard() {
       className="relative min-h-screen flex flex-col before:content-[''] 
   before:absolute 
   before:inset-0 
-  before:bg-[url('/images/blue-bg.jpg')] 
+  before:bg-[url('/images/x-bg.webp')] 
   before:bg-cover 
   before:bg-center 
   before:opacity-80 
@@ -1018,7 +1075,7 @@ export function GuestDashboard() {
                   const isBeyondBookable = isAfter(sod, maxBookingDate)
                   const booked = meetingsByDate.get(dateStr) ?? []
                   const hasVisit = booked.length > 0
-                  const mineOnDay = myMeetings.find((m) => m.date === dateStr)
+                  const mineOnDay = booked[0]
                   const isWeekendCell = isWeekend(day)
                   const isCabinetDay = !isWeekendCell && (cabinetDayByDate.get(dateStr) ?? false)
                   const disabledReason =
@@ -1168,11 +1225,6 @@ export function GuestDashboard() {
                               <span className="text-[12px] font-sans font-semibold">{mineOnDay.time}</span>
                             </div>
                           )}
-                          {/* {isPast && (
-                            <span className="mt-2 text-[9px] sm:text-[10px] leading-tight text-slate-500 font-sans">
-                              termin minął
-                            </span>
-                          )} */}
                         </div>
                       )}
 
@@ -1246,54 +1298,137 @@ export function GuestDashboard() {
           </div>
         </div>
 
-        {sortedMeetings.length > 0 && (
+        {(upcomingMeetings.length > 0 || pastMeetings.length > 0) && (
           <section className="mt-6 max-w-5xl mx-auto">
-            <h3 className="text-sm font-bold text-slate-800 font-sans mb-2">Lista wizyt</h3>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-slate-800 font-sans mr-1">Lista wizyt</h3>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setVisitsListTab("upcoming")}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans transition-colors"
+                  style={{
+                    background:
+                      visitsListTab === "upcoming"
+                        ? "rgba(12,17,91,0.12)"
+                        : "rgba(255,255,255,0.45)",
+                    border:
+                      visitsListTab === "upcoming"
+                        ? "1px solid rgba(12,17,91,0.35)"
+                        : "1px solid rgba(0,0,0,0.08)",
+                    color: visitsListTab === "upcoming" ? "#0C115B" : "#475569",
+                  }}
+                >
+                  Nadchodzące{upcomingMeetings.length > 0 ? ` (${upcomingMeetings.length})` : ""}
+                </button>
+                {pastMeetings.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPastVisitsVisibleCount(PAST_VISITS_PAGE_SIZE)
+                      setVisitsListTab("past")
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold font-sans transition-colors"
+                    style={{
+                      background:
+                        visitsListTab === "past"
+                          ? "rgba(148,163,184,0.2)"
+                          : "rgba(255,255,255,0.45)",
+                      border:
+                        visitsListTab === "past"
+                          ? "1px solid rgba(100,116,139,0.35)"
+                          : "1px solid rgba(0,0,0,0.08)",
+                      color: visitsListTab === "past" ? "#475569" : "#64748b",
+                    }}
+                  >
+                    Minione ({pastMeetings.length})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {visitsListTab === "upcoming" && upcomingMeetings.length === 0 && (
+              <p className="text-slate-600 text-sm font-sans italic py-2">
+                Brak nadchodzących wizyt.
+              </p>
+            )}
+
+            {visitsListTab === "past" && pastMeetings.length === 0 && (
+              <p className="text-slate-600 text-sm font-sans italic py-2">
+                Brak minionych wizyt.
+              </p>
+            )}
+
             <ul className="flex flex-col gap-2">
-              {sortedMeetings.map((m) => {
+              {displayedMeetings.map((m) => {
+                const isPastVisit = !isUpcomingMeeting(m, now)
                 const colors = CATEGORY_COLORS[m.category]
                 const visitDate = format(meetingDateLocal(m.date), "EEEE, d MMMM yyyy", { locale: pl })
                 return (
                 <li
                   key={m.id}
-                  className="rounded-2xl px-3 py-3 sm:px-4 sm:py-4 flex flex-col gap-3 sm:gap-4 md:flex-row md:items-center md:justify-between"
+                  aria-disabled={isPastVisit || undefined}
+                  className={`rounded-2xl px-3 py-3 sm:px-4 sm:py-4 flex flex-col gap-3 sm:gap-4 md:flex-row md:items-center md:justify-between ${
+                    isPastVisit ? "pointer-events-none select-none" : ""
+                  }`}
                   style={{
                     background: colors.bg,
-                    border: `1px solid ${colors.border}`,
+                    border: isPastVisit
+                      ? "1.5px dashed rgba(100,116,139,0.32)"
+                      : `1px solid ${colors.border}`,
+                    backgroundImage: isPastVisit
+                      ? "repeating-linear-gradient(135deg, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 1px, transparent 1px, transparent 10px)"
+                      : undefined,
                     backdropFilter: "blur(12px)",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.4)",
+                    boxShadow: isPastVisit
+                      ? "inset 0 1px 0 rgba(255,255,255,0.3)"
+                      : "0 4px 12px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.4)",
                   }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span
                         className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: colors.dot }}
+                        style={{ backgroundColor: colors.dot, opacity: isPastVisit ? 0.75 : 1 }}
                       />
-                      <div className="text-sm font-semibold text-slate-800">{m.title}</div>
+                      <div className={`text-sm font-semibold ${isPastVisit ? "text-slate-600" : "text-slate-800"}`}>
+                        {m.title}
+                      </div>
                       <span
                         className="px-2 py-0.5 rounded-full text-[10px] font-semibold font-sans"
                         style={{
                           background: "rgba(255,255,255,0.45)",
-                          border: `1px solid ${colors.border}`,
+                          border: isPastVisit
+                            ? "1px dashed rgba(100,116,139,0.28)"
+                            : `1px solid ${colors.border}`,
                           color: colors.dot,
                         }}
                       >
                         {CATEGORY_LABELS[m.category] ?? m.category}
                       </span>
+                      {isPastVisit && (
+                        <span className="text-[10px] font-semibold font-sans text-slate-500 uppercase tracking-wide">
+                          Minęła
+                        </span>
+                      )}
                     </div>
                     <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch gap-2">
                       <div
                         className="flex items-center gap-3 rounded-xl px-3 py-2.5 w-full min-w-0 sm:min-w-[220px] sm:flex-1"
                         style={{
-                          background: "rgba(255,255,255,0.68)",
-                          border: `1px solid ${colors.border}`,
+                          background: isPastVisit ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.68)",
+                          border: isPastVisit
+                            ? "1px dashed rgba(100,116,139,0.24)"
+                            : `1px solid ${colors.border}`,
                           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
                         }}
                       >
                         <span
                           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                          style={{ background: "rgba(255,255,255,0.85)", color: colors.dot }}
+                          style={{
+                            background: "rgba(255,255,255,0.85)",
+                            color: colors.dot,
+                          }}
                         >
                           <CalendarDays className="w-4 h-4" />
                         </span>
@@ -1301,7 +1436,7 @@ export function GuestDashboard() {
                           <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-sans">
                             Data wizyty
                           </div>
-                          <div className="text-sm font-semibold text-slate-800 leading-tight">
+                          <div className={`text-sm font-semibold leading-tight ${isPastVisit ? "text-slate-600" : "text-slate-800"}`}>
                             <span className="sm:hidden">
                               {format(meetingDateLocal(m.date), "EEE, d MMM yyyy", { locale: pl })}
                             </span>
@@ -1314,8 +1449,10 @@ export function GuestDashboard() {
                           <div
                             className="flex items-center gap-3 rounded-xl px-3 py-2.5 min-w-0 flex-1 sm:min-w-[145px] sm:flex-none"
                             style={{
-                              background: "rgba(255,255,255,0.82)",
-                              border: `1px solid ${colors.border}`,
+                              background: isPastVisit ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.82)",
+                              border: isPastVisit
+                                ? "1px dashed rgba(100,116,139,0.24)"
+                                : `1px solid ${colors.border}`,
                               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
                             }}
                           >
@@ -1329,16 +1466,21 @@ export function GuestDashboard() {
                               <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-sans">
                                 Godzina
                               </div>
-                              <div className="text-base font-bold text-slate-800 leading-tight">{m.time}</div>
+                              <div className={`text-base font-bold leading-tight ${isPastVisit ? "text-slate-600" : "text-slate-800"}`}>
+                                {m.time}
+                              </div>
                             </div>
                           </div>
                         )}
                         {m.duration ? (
                           <div
-                            className="inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 sm:self-auto"
+                            className="inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium sm:self-auto"
                             style={{
                               background: "rgba(255,255,255,0.45)",
-                              border: `1px solid ${colors.border}`,
+                              border: isPastVisit
+                                ? "1px dashed rgba(100,116,139,0.24)"
+                                : `1px solid ${colors.border}`,
+                              color: isPastVisit ? "#475569" : "#334155",
                             }}
                           >
                             {m.duration} min
@@ -1347,6 +1489,7 @@ export function GuestDashboard() {
                       </div>
                     </div>
                   </div>
+                  {!isPastVisit && (
                   <div className="flex gap-2 self-stretch sm:self-start w-full sm:w-auto">
                     <button
                       type="button"
@@ -1376,9 +1519,27 @@ export function GuestDashboard() {
                       Usuń
                     </button>
                   </div>
+                  )}
                 </li>
               )})}
             </ul>
+
+            {visitsListTab === "past" && hasMorePastMeetings && (
+              <button
+                type="button"
+                onClick={() =>
+                  setPastVisitsVisibleCount((count) => count + PAST_VISITS_PAGE_SIZE)
+                }
+                className="mt-3 w-full sm:w-auto px-4 py-2.5 rounded-xl text-sm font-semibold font-sans text-slate-700 transition-all hover:-translate-y-0.5 active:translate-y-0"
+                style={{
+                  background: "rgba(255,255,255,0.55)",
+                  border: "1px solid rgba(0,0,0,0.1)",
+                  backdropFilter: "blur(10px)",
+                }}
+              >
+                Zobacz więcej
+              </button>
+            )}
           </section>
         )}
       </main>
@@ -1417,6 +1578,9 @@ export function GuestDashboard() {
           scheduleRecords={scheduleSlotRecords}
           initialTitle={editing?.title}
           prefillTitle={editing ? undefined : readGuestCachedDisplayName()}
+          initialPhone={editing?.userPhone}
+          prefillPhone={editing ? undefined : readGuestCachedPhone()}
+          showPhoneField
           initialDescription={editing?.description}
           initialCategory={editing?.category}
           editingTaskId={editing?.id}
@@ -1436,6 +1600,7 @@ export function GuestDashboard() {
             date: string
             time?: string
             duration?: number
+            phone?: string
           }) => {
             const expectedCategory = getCategoryForDate(
               payload.date,
@@ -1477,10 +1642,12 @@ export function GuestDashboard() {
               }
 
               const nowIso = new Date().toISOString()
+              const { phone, ...meetingFields } = payload
               try {
                 await db.transact(
                   db.tx.meetings[editing.id].update({
-                    ...payload,
+                    ...meetingFields,
+                    userPhone: phone,
                     status: "confirmed",
                     previousDate: null,
                     previousTime: null,
@@ -1492,6 +1659,7 @@ export function GuestDashboard() {
                 )
 
                 writeGuestCachedDisplayName(payload.title)
+                if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
                 fetch("/api/n8n/meetings", {
                   method: "POST",
@@ -1501,6 +1669,7 @@ export function GuestDashboard() {
                     editedBy: "user",
                     meetingId: editing.id,
                     ...payload,
+                    userPhone: payload.phone,
                     userEmail: editing.userEmail ?? user?.email,
                     status: "confirmed",
                     previousDate: null,
@@ -1548,10 +1717,12 @@ export function GuestDashboard() {
 
               const meetingId = id()
               const createdAt = new Date().toISOString()
+              const { phone, ...meetingFields } = payload
               try {
                 await db.transact([
                   (db.tx.meetings as any)[meetingId].create({
-                    ...payload,
+                    ...meetingFields,
+                    userPhone: phone,
                     createdAt,
                     userId: user?.id,
                     userEmail: user?.email,
@@ -1562,6 +1733,7 @@ export function GuestDashboard() {
                 ])
 
                 writeGuestCachedDisplayName(payload.title)
+                if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
                 fetch("/api/n8n/meetings", {
                   method: "POST",
@@ -1570,6 +1742,7 @@ export function GuestDashboard() {
                     event: "meeting.created",
                     meetingId,
                     ...payload,
+                    userPhone: payload.phone,
                     createdAt,
                     userId: user?.id,
                     userEmail: user?.email,

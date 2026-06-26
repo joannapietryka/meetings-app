@@ -343,7 +343,7 @@ describe("GuestDashboard", () => {
     })
   })
 
-  it("keeps past visits visible on the calendar grid as disabled", () => {
+  it("moves past visits to the Minione tab and hides them from the calendar grid", async () => {
     mockMeetings([
       {
         id: "m1",
@@ -360,8 +360,44 @@ describe("GuestDashboard", () => {
 
     const pastCell = screen.getByTestId("calendar-day-2026-03-12")
     expect(pastCell).toHaveAttribute("aria-disabled", "true")
-    expect(pastCell).toHaveTextContent(/miniona wizyta/i)
-    expect(pastCell).toHaveTextContent(/termin minął/i)
+    expect(pastCell).not.toHaveTextContent(/miniona wizyta/i)
+
+    expect(screen.getByRole("button", { name: /minione \(1\)/i })).toBeInTheDocument()
+    expect(screen.queryByText(/miniona wizyta/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /minione \(1\)/i }))
+
+    expect(screen.getByText(/miniona wizyta/i)).toBeInTheDocument()
+    expect(screen.getByText(/minęła/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^edytuj$/i })).not.toBeInTheDocument()
+  })
+
+  it("loads past visits in batches of 5 with Zobacz więcej", async () => {
+    mockMeetings(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `past-${index}`,
+        userId: mockUser.id,
+        title: `Miniona wizyta ${index + 1}`,
+        category: "online",
+        date: `2026-03-${String(14 - index).padStart(2, "0")}`,
+        time: "09:00",
+        duration: 50,
+      })) as any,
+    )
+
+    render(<GuestDashboard />)
+
+    await user.click(screen.getByRole("button", { name: /minione \(6\)/i }))
+
+    expect(screen.getByText(/miniona wizyta 1/i)).toBeInTheDocument()
+    expect(screen.getByText(/miniona wizyta 5/i)).toBeInTheDocument()
+    expect(screen.queryByText(/miniona wizyta 6/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /zobacz więcej/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /zobacz więcej/i }))
+
+    expect(screen.getByText(/miniona wizyta 6/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /zobacz więcej/i })).not.toBeInTheDocument()
   })
 
   it("shows weekly limit info on disabled dates in a booked week", () => {
