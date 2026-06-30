@@ -15,7 +15,19 @@ const txMeetings = new Proxy({} as Record<string, ReturnType<typeof createTxMeet
 
 jest.mock("@/lib/db", () => ({
   db: {
-    useUser: jest.fn(() => ({ id: "test-user-id", email: "guest@test.com" })),
+    useUser: jest.fn(() => ({
+      id: "test-user-id",
+      email: "guest@test.com",
+      refresh_token: "test-refresh-token",
+    })),
+    getAuth: jest.fn(() =>
+      Promise.resolve({
+        id: "test-user-id",
+        email: "guest@test.com",
+        refresh_token: "test-refresh-token",
+        isGuest: false,
+      }),
+    ),
     useQuery: jest.fn(() => ({
       isLoading: false,
       error: null,
@@ -25,6 +37,7 @@ jest.mock("@/lib/db", () => ({
       signOut: jest.fn(),
       sendMagicCode: jest.fn(),
       signInWithMagicCode: jest.fn(),
+      signInWithToken: jest.fn(),
     },
     transact: jest.fn((arg: unknown) => Promise.resolve(arg)),
     tx: { meetings: txMeetings },

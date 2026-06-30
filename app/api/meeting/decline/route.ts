@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
+import { ZodError } from "zod"
 import { instantAdminQuery, instantAdminTransact } from "@/lib/instant-admin"
 import { verifyMeetingActionToken } from "@/lib/tokens"
+import {
+  parseJsonBody,
+  serverErrorResponse,
+  validationErrorResponse,
+} from "@/lib/api-response"
+import { meetingActionBodySchema } from "@/lib/schemas/auth"
 
 type Meeting = {
   id: string
@@ -8,12 +15,7 @@ type Meeting = {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { meetingId?: string; token?: string }
-    const meetingId = body.meetingId
-    const token = body.token
-    if (!meetingId || !token) {
-      return NextResponse.json({ error: "meetingId and token are required" }, { status: 400 })
-    }
+    const { meetingId, token } = await parseJsonBody(req, meetingActionBodySchema)
 
     const verified = verifyMeetingActionToken({ token, meetingId, action: "decline" })
     if (!verified.ok) {
@@ -32,11 +34,8 @@ export async function POST(req: Request) {
     })
 
     return NextResponse.json({ ok: true })
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: "server_error", message: err?.message ?? "Unknown error" },
-      { status: 500 }
-    )
+  } catch (err) {
+    if (err instanceof ZodError) return validationErrorResponse(err)
+    return serverErrorResponse("meeting/decline", err)
   }
 }
-

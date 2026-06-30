@@ -24,6 +24,7 @@ import {
 import { getAdminCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
 import { snapTimeToFullHour } from "@/lib/time-options"
 import { DayColumn } from "@/components/calendar/DayColumn"
+import { authedJsonPost } from "@/lib/auth-client"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
 type Meeting = {
@@ -290,27 +291,23 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       .then(() => {
         // Fire-and-forget n8n trigger for edited meetings.
         // n8n can use `status === "not_confirmed"` and/or `editedBy` to decide whether to email.
-        fetch("/api/n8n/meetings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event: "meeting.edited",
-            editedBy: "admin",
-            meetingId: moving.id,
-            title: moving.title,
-            description: moving.description,
-            category: moving.category,
-            userEmail: moving.userEmail,
-            date: targetDate,
-            time: newTime,
-            duration: moving.duration,
-            previousDate: isUserMeeting ? moving.date : null,
-            previousTime: isUserMeeting ? moving.time : null,
-            previousDuration: isUserMeeting ? moving.duration : null,
-            status: isUserMeeting ? "not_confirmed" : null,
-            changeRequestedAt: isUserMeeting ? nowIso : null,
-            updatedAt: nowIso,
-          }),
+        authedJsonPost("/api/n8n/meetings", {
+          event: "meeting.edited",
+          editedBy: "admin",
+          meetingId: moving.id,
+          title: moving.title,
+          description: moving.description,
+          category: moving.category,
+          userEmail: moving.userEmail,
+          date: targetDate,
+          time: newTime,
+          duration: moving.duration,
+          previousDate: isUserMeeting ? moving.date : null,
+          previousTime: isUserMeeting ? moving.time : null,
+          previousDuration: isUserMeeting ? moving.duration : null,
+          status: isUserMeeting ? "not_confirmed" : null,
+          changeRequestedAt: isUserMeeting ? nowIso : null,
+          updatedAt: nowIso,
         }).catch(() => {})
       })
       .catch((err: any) => {
@@ -328,22 +325,18 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
 
     // Trigger n8n so it can email the guest (admins deleting)
     if (guestEmail && meeting) {
-      fetch("/api/n8n/meetings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "meeting.deleted",
-          deletedBy: "admin",
-          meetingId,
-          title: meeting.title,
-          description: meeting.description,
-          category: meeting.category,
-          date: meeting.date,
-          time: meeting.time,
-          duration: meeting.duration,
-          userEmail: guestEmail,
-          deletedAt,
-        }),
+      authedJsonPost("/api/n8n/meetings", {
+        event: "meeting.deleted",
+        deletedBy: "admin",
+        meetingId,
+        title: meeting.title,
+        description: meeting.description,
+        category: meeting.category,
+        date: meeting.date,
+        time: meeting.time,
+        duration: meeting.duration,
+        userEmail: guestEmail,
+        deletedAt,
       }).catch(() => {})
     }
 
@@ -416,33 +409,29 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       ])
         .then(() => {
           // Fire-and-forget n8n trigger for edited meetings.
-          fetch("/api/n8n/meetings", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              event: "meeting.edited",
-              editedBy: "admin",
-              meetingId: editing.id,
-              title: payload.title,
-              description: payload.description,
-              category: payload.category,
-              userEmail: payload.email,
-              userPhone: payload.phone ?? null,
-              date: payload.date,
-              time: payload.time,
-              duration: payload.duration,
-              status: needsConfirmation && isUserMeeting ? "not_confirmed" : isUserMeeting ? "confirmed" : null,
-              ...(needsConfirmation && isUserMeeting
-                ? {
-                    previousDate: editing.date,
-                    previousTime: editing.time,
-                    previousDuration: editing.duration,
-                    status: "not_confirmed",
-                    changeRequestedAt: nowIso,
-                  }
-                : {}),
-              updatedAt: nowIso,
-            }),
+          authedJsonPost("/api/n8n/meetings", {
+            event: "meeting.edited",
+            editedBy: "admin",
+            meetingId: editing.id,
+            title: payload.title,
+            description: payload.description,
+            category: payload.category,
+            userEmail: payload.email,
+            userPhone: payload.phone ?? null,
+            date: payload.date,
+            time: payload.time,
+            duration: payload.duration,
+            status: needsConfirmation && isUserMeeting ? "not_confirmed" : isUserMeeting ? "confirmed" : null,
+            ...(needsConfirmation && isUserMeeting
+              ? {
+                  previousDate: editing.date,
+                  previousTime: editing.time,
+                  previousDuration: editing.duration,
+                  status: "not_confirmed",
+                  changeRequestedAt: nowIso,
+                }
+              : {}),
+            updatedAt: nowIso,
           }).catch(() => {})
 
           setModalConfig(null)
@@ -473,24 +462,20 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
         }),
       ])
         .then(() => {
-          fetch("/api/n8n/meetings", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              event: "meeting.created",
-              meetingId,
-              title: payload.title,
-              description: payload.description,
-              category: payload.category,
-              date: payload.date,
-              time: payload.time,
-              duration: payload.duration,
-              userEmail: payload.email,
-              userPhone: payload.phone ?? null,
-              createdAt,
-              lastEditedBy: "admin",
-              updatedAt: createdAt,
-            }),
+          authedJsonPost("/api/n8n/meetings", {
+            event: "meeting.created",
+            meetingId,
+            title: payload.title,
+            description: payload.description,
+            category: payload.category,
+            date: payload.date,
+            time: payload.time,
+            duration: payload.duration,
+            userEmail: payload.email,
+            userPhone: payload.phone ?? null,
+            createdAt,
+            lastEditedBy: "admin",
+            updatedAt: createdAt,
           }).catch(() => {})
         })
         .catch((err: any) => {

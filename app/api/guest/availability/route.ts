@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server"
 import { instantAdminQuery } from "@/lib/instant-admin"
+import {
+  rateLimitResponse,
+  serverErrorResponse,
+  validationErrorResponse,
+} from "@/lib/api-response"
+import { dateRangeQuerySchema } from "@/lib/schemas/auth"
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit"
+import { ZodError } from "zod"
 
 type Meeting = {
   id: string
@@ -8,22 +16,16 @@ type Meeting = {
   duration?: number
 }
 
-function isValidDateStr(value: string | null): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
-}
-
 export async function GET(req: Request) {
+  const rate = enforceRateLimit(req, "guest:availability", RATE_LIMITS.availability)
+  if (!rate.allowed) return rateLimitResponse(rate)
+
   try {
     const { searchParams } = new URL(req.url)
-    const from = searchParams.get("from")
-    const to = searchParams.get("to")
-
-    if (!isValidDateStr(from) || !isValidDateStr(to)) {
-      return NextResponse.json(
-        { error: "invalid_range", message: "from and to must be YYYY-MM-DD" },
-        { status: 400 },
-      )
-    }
+    const { from, to } = dateRangeQuerySchema.parse({
+      from: searchParams.get("from"),
+      to: searchParams.get("to"),
+    })
 
     const result = await instantAdminQuery<{ meetings: Meeting[] }>({
       query: { meetings: {} },
@@ -47,15 +49,16 @@ export async function GET(req: Request) {
         },
       },
     )
-  } catch (err: any) {
-    console.error("[guest/availability]", err)
+  } catch (err) {
+    if (err instanceof ZodError) return validationErrorResponse(err)
     const message =
-      err?.name === "TimeoutError" || err?.name === "AbortError"
+      err instanceof Error &&
+      (err.name === "TimeoutError" || err.name === "AbortError")
         ? "Przekroczono czas pobierania dostępności."
-        : err?.message ?? "Unknown error"
-    return NextResponse.json(
-      { error: "server_error", message },
-      { status: 500 },
-    )
+        : undefined
+    if (message) {
+      return NextResponse.json({ error: "timeout", message }, { status: 504 })
+    }
+    return serverErrorResponse("guest/availability", err)
   }
 }

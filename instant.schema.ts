@@ -29,6 +29,7 @@ export default i.schema({
       hashedCode: i.string(),   // HMAC-SHA256 hex, never stored plaintext
       expiresAt: i.string(),    // ISO timestamp — 5 min TTL
       attempts: i.number(),     // max 5 before lockout
+      lockedUntil: i.string().optional(), // ISO timestamp — 15 min lockout after max attempts
     }),
     meetings: i.entity({
       title: i.string(),

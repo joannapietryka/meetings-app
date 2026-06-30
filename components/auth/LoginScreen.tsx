@@ -4,34 +4,17 @@ import React, { useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { db } from "@/lib/db"
 
-type Step = "email" | "code" | "access_denied"
+type Step = "email" | "code" | "check_email"
 
 export function LoginScreen() {
   const [step, setStep] = useState<Step>("email")
   const [sentEmail, setSentEmail] = useState("")
+  const [checkEmailMessage, setCheckEmailMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [codeError, setCodeError] = useState("")
-  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null)
   const emailRef = useRef<HTMLInputElement>(null)
   const codeRef = useRef<HTMLInputElement>(null)
-
-  const { isLoading: isLoadingUsers, data: userData } = db.useQuery({ allowedUsers: {} })
-
-  const adminEmails = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? ""
-    return raw
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-  }, [])
-
-  function isEmailAllowed(email: string): boolean {
-    const lower = email.toLowerCase()
-    if (adminEmails.includes(lower)) return true
-    const list = (userData?.allowedUsers ?? []) as unknown as { email: string }[]
-    return list.some((u) => u.email.toLowerCase() === lower)
-  }
 
   const inputStyle: React.CSSProperties = useMemo(
     () => ({
@@ -41,19 +24,13 @@ export function LoginScreen() {
       color: "#1e293b",
       outline: "none",
     }),
-    []
+    [],
   )
 
   async function handleSendCode(e: React.FormEvent) {
     e.preventDefault()
     const email = emailRef.current?.value?.trim() ?? ""
     if (!email) return
-
-    // Client-side pre-check to avoid a round-trip for obvious rejections
-    if (!isLoadingUsers && !isEmailAllowed(email)) {
-      setStep("access_denied")
-      return
-    }
 
     setIsSending(true)
     try {
@@ -65,14 +42,16 @@ export function LoginScreen() {
 
       const data = await res.json()
 
-      if (res.status === 403 || data.error === "not_allowed") {
-        setStep("access_denied")
-        return
-      }
       if (res.status === 429) {
         const secs = data.retryAfterSec ?? 300
         const mins = Math.ceil(secs / 60)
-        alert(`Kod został już wysłany. Spróbuj ponownie za ${mins} min.`)
+        if (data.error === "locked_out") {
+          alert(
+            `Zbyt wiele błędnych prób logowania. Spróbuj ponownie za ${mins} min.`,
+          )
+        } else {
+          alert(`Kod został już wysłany. Spróbuj ponownie za ${mins} min.`)
+        }
         return
       }
       if (!res.ok) {
@@ -80,10 +59,18 @@ export function LoginScreen() {
         return
       }
 
-      setSentEmail(email)
-      setCodeError("")
-      setAttemptsRemaining(null)
-      setStep("code")
+      if (data.sent === true) {
+        setSentEmail(email)
+        setCodeError("")
+        setStep("code")
+        return
+      }
+
+      setCheckEmailMessage(
+        data.message ??
+          "Jeśli Twój adres jest uprawniony, wysłaliśmy kod logowania. Sprawdź skrzynkę (także folder spam).",
+      )
+      setStep("check_email")
     } catch {
       alert("Błąd połączenia. Spróbuj ponownie.")
     } finally {
@@ -116,16 +103,20 @@ export function LoginScreen() {
       if (res.status === 429 || data.error === "too_many_attempts") {
         setStep("email")
         setSentEmail("")
-        alert("Zbyt wiele błędnych prób. Wyślij nowy kod.")
+        const secs = data.retryAfterSec
+        if (secs) {
+          alert(`Zbyt wiele błędnych prób. Spróbuj ponownie za ${Math.ceil(secs / 60)} min.`)
+        } else {
+          alert("Zbyt wiele błędnych prób. Wyślij nowy kod później.")
+        }
         return
       }
       if (res.status === 401 || data.error === "invalid_code") {
         if (codeRef.current) codeRef.current.value = ""
-        setAttemptsRemaining(data.attemptsRemaining ?? null)
         setCodeError(
           data.attemptsRemaining === 0
             ? "Nieprawidłowy kod. Brak pozostałych prób."
-            : `Nieprawidłowy kod. Pozostałe próby: ${data.attemptsRemaining ?? ""}`
+            : `Nieprawidłowy kod. Pozostałe próby: ${data.attemptsRemaining ?? ""}`,
         )
         return
       }
@@ -134,7 +125,6 @@ export function LoginScreen() {
         return
       }
 
-      // Token verified — sign in to InstantDB session
       await db.auth.signInWithToken(data.token)
     } catch {
       alert("Błąd połączenia. Spróbuj ponownie.")
@@ -184,24 +174,14 @@ export function LoginScreen() {
           </h2>
         </div>
 
-        {/* ── Access denied ── */}
-        {step === "access_denied" && (
+        {step === "check_email" && (
           <div className="flex flex-col gap-4">
-            <div
-              className="rounded-xl p-4 text-center"
-              style={{
-                background: "rgba(255,240,240,0.7)",
-                border: "1px solid rgba(200,0,0,0.15)",
-              }}
-            >
-              <p className="text-slate-800 font-bold text-sm font-sans mb-2">
-                Brak dostępu
-              </p>
-              <p className="text-slate-600 text-xs font-sans leading-relaxed">
-                Tylko autoryzowani pacjenci mogą rezerwować wizyty przez system online.
-                Aby uzyskać dostęp, skontaktuj się z mną mailowo lub przez SMS.
-              </p>
-            </div>
+            <p className="text-slate-700 text-sm font-sans leading-relaxed">
+              {checkEmailMessage}
+            </p>
+            <p className="text-slate-600 text-xs font-sans leading-relaxed">
+              Jeśli kod nie dotrze, skontaktuj się mailowo lub przez SMS, aby uzyskać dostęp.
+            </p>
             <button
               type="button"
               onClick={() => {
@@ -215,7 +195,6 @@ export function LoginScreen() {
           </div>
         )}
 
-        {/* ── Email form ── */}
         {step === "email" && (
           <form onSubmit={handleSendCode} className="flex flex-col gap-4">
             <div>
@@ -238,7 +217,7 @@ export function LoginScreen() {
 
             <button
               type="submit"
-              disabled={isSending || isLoadingUsers}
+              disabled={isSending}
               className="w-full py-3 rounded-xl font-bold font-sans text-sm transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
               style={{
                 backgroundColor: "#0C115B",
@@ -263,7 +242,6 @@ export function LoginScreen() {
           </form>
         )}
 
-        {/* ── Code form ── */}
         {step === "code" && (
           <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
             <div>
@@ -318,7 +296,6 @@ export function LoginScreen() {
                 setStep("email")
                 setSentEmail("")
                 setCodeError("")
-                setAttemptsRemaining(null)
               }}
               className="text-xs font-semibold font-sans text-slate-600 hover:text-slate-800"
             >

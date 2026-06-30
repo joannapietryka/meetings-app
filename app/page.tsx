@@ -1,38 +1,14 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { db } from "@/lib/db"
 import { AdminCalendar } from "@/components/admin/AdminCalendar"
 import { AdminSettings } from "@/components/admin/AdminSettings"
 import { GuestDashboard } from "@/components/guest/GuestDashboard"
 import { LoginScreen } from "@/components/auth/LoginScreen"
+import { useAuthSession } from "@/lib/use-auth-session"
 
 type AdminView = "calendar" | "settings"
-
-function useIsAdmin(): boolean {
-  const user = db.useUser()
-  const adminEmails = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? ""
-    return raw
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-  }, [])
-  return adminEmails.includes((user?.email ?? "").toLowerCase())
-}
-
-function useIsAllowedGuest(): { allowed: boolean; loading: boolean } {
-  const user = db.useUser()
-  const { isLoading, data } = db.useQuery({ allowedUsers: {} })
-  return useMemo(() => {
-    if (isLoading) return { allowed: false, loading: true }
-    const list = (data?.allowedUsers ?? []) as unknown as { email: string }[]
-    // Empty list → no one is allowed (admin must explicitly whitelist patients)
-    if (list.length === 0) return { allowed: false, loading: false }
-    const email = (user?.email ?? "").toLowerCase()
-    return { allowed: list.some((u) => u.email.toLowerCase() === email), loading: false }
-  }, [isLoading, data, user])
-}
 
 function AccessDenied() {
   return (
@@ -69,18 +45,18 @@ function RoleRouter({
   adminView: AdminView
   setAdminView: (v: AdminView) => void
 }) {
-  const isAdmin = useIsAdmin()
-  const { allowed, loading } = useIsAllowedGuest()
+  const { session, loading } = useAuthSession()
 
-  if (isAdmin) {
+  if (loading) return null
+
+  if (session?.isAdmin) {
     if (adminView === "settings") {
       return <AdminSettings onBack={() => setAdminView("calendar")} />
     }
     return <AdminCalendar onOpenSettings={() => setAdminView("settings")} />
   }
 
-  if (loading) return null
-  if (!allowed) return <AccessDenied />
+  if (!session?.isGuestAllowed) return <AccessDenied />
   return <GuestDashboard />
 }
 

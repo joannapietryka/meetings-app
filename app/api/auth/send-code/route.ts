@@ -1,39 +1,42 @@
 import { NextResponse } from "next/server"
+import { ZodError } from "zod"
 import { id } from "@instantdb/react"
 import { instantAdminQuery, instantAdminTransact } from "@/lib/instant-admin"
+import { isGuestEmailAllowed } from "@/lib/access-control"
+import {
+  parseJsonBody,
+  rateLimitResponse,
+  serverErrorResponse,
+  validationErrorResponse,
+} from "@/lib/api-response"
+import { sendCodeBodySchema } from "@/lib/schemas/auth"
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit"
 import {
   generateOtpCode,
   hashOtpCode,
   otpExpiresAt,
   OTP_TTL_MS,
 } from "@/lib/otp"
+import {
+  getActiveOtpLock,
+  getActiveOtpSession,
+  otpLockRetryAfterSec,
+  type OtpSessionRecord,
+} from "@/lib/otp-lockout"
 
-type AllowedUser = { email: string }
-type OtpSession = { id: string; email: string; expiresAt: string }
-
-async function isEmailAllowed(email: string): Promise<boolean> {
-  const lower = email.toLowerCase()
-
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-  if (adminEmails.includes(lower)) return true
-
-  const result = await instantAdminQuery<{ allowedUsers: AllowedUser[] }>({
-    query: { allowedUsers: {} },
-  })
-  return (result.allowedUsers ?? []).some((u) => u.email.toLowerCase() === lower)
+function isProduction(): boolean {
+  return process.env.NODE_ENV === "production"
 }
 
 async function sendOtpEmail(email: string, code: string): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.RESEND_FROM_EMAIL ?? "noreplay@katarzynapietryka.com>"
+  const from = process.env.RESEND_FROM_EMAIL ?? "noreply@katarzynapietryka.com"
 
   if (!apiKey) {
-    // Fall back to logging in development when Resend is not configured
-    console.warn(`[OTP] Code for ${email}: ${code}  (set RESEND_API_KEY to send real emails)`)
-    return
+    if (isProduction()) {
+      throw new Error("RESEND_API_KEY is not configured")
+    }
+    throw new Error("RESEND_API_KEY is required to send login codes")
   }
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -67,48 +70,74 @@ async function sendOtpEmail(email: string, code: string): Promise<void> {
   }
 }
 
+function genericSendResponse() {
+  return NextResponse.json({
+    ok: true,
+    ttlSeconds: Math.floor(OTP_TTL_MS / 1000),
+    message:
+      "Jeśli Twój adres jest uprawniony, wysłaliśmy kod logowania. Sprawdź skrzynkę (także folder spam).",
+  })
+}
+
+function sessionsEligibleForCleanup(sessions: OtpSessionRecord[], now = Date.now()) {
+  return sessions.filter((session) => {
+    if (session.lockedUntil && now < new Date(session.lockedUntil).getTime()) {
+      return false
+    }
+    if (session.hashedCode && now < new Date(session.expiresAt).getTime()) {
+      return false
+    }
+    return true
+  })
+}
+
 export async function POST(req: Request) {
+  const rate = enforceRateLimit(req, "auth:send-code", RATE_LIMITS.sendCode)
+  if (!rate.allowed) return rateLimitResponse(rate)
+
   try {
-    const body = (await req.json()) as { email?: string }
-    const email = (body.email ?? "").trim().toLowerCase()
+    const { email } = await parseJsonBody(req, sendCodeBodySchema)
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: "invalid_email" }, { status: 400 })
-    }
-
-    const allowed = await isEmailAllowed(email)
+    const allowed = await isGuestEmailAllowed(email)
     if (!allowed) {
-      return NextResponse.json({ error: "not_allowed" }, { status: 403 })
+      await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 300)))
+      return genericSendResponse()
     }
 
-    // Rate-limit: reject if an unexpired session already exists (sent < TTL ago)
-    const existing = await instantAdminQuery<{ otpSessions: OtpSession[] }>({
+    const existing = await instantAdminQuery<{ otpSessions: OtpSessionRecord[] }>({
       query: { otpSessions: { $: { where: { email } } } },
     })
-    const activeSession = (existing.otpSessions ?? []).find(
-      (s) => new Date(s.expiresAt).getTime() > Date.now()
-    )
+    const sessions = existing.otpSessions ?? []
+
+    const lock = getActiveOtpLock(sessions)
+    if (lock?.lockedUntil) {
+      return NextResponse.json(
+        {
+          error: "locked_out",
+          retryAfterSec: otpLockRetryAfterSec(lock.lockedUntil),
+        },
+        { status: 429 },
+      )
+    }
+
+    const activeSession = getActiveOtpSession(sessions)
     if (activeSession) {
       const retryAfterSec = Math.ceil(
-        (new Date(activeSession.expiresAt).getTime() - Date.now()) / 1000
+        (new Date(activeSession.expiresAt).getTime() - Date.now()) / 1000,
       )
       return NextResponse.json(
         { error: "rate_limited", retryAfterSec },
-        { status: 429 }
+        { status: 429 },
       )
     }
 
-    // Delete any stale/expired sessions for this email
-    const stale = (existing.otpSessions ?? []).filter(
-      (s) => new Date(s.expiresAt).getTime() <= Date.now()
-    )
+    const stale = sessionsEligibleForCleanup(sessions)
     if (stale.length > 0) {
       await instantAdminTransact({
         steps: stale.map((s) => ["delete", "otpSessions", s.id]),
       })
     }
 
-    // Generate code, hash it, store in DB
     const code = generateOtpCode()
     const hashedCode = hashOtpCode(code)
     const expiresAt = otpExpiresAt()
@@ -120,15 +149,15 @@ export async function POST(req: Request) {
       ],
     })
 
-    // Send email (after DB write so we never lose track of a sent code)
     await sendOtpEmail(email, code)
 
-    return NextResponse.json({ ok: true, ttlSeconds: Math.floor(OTP_TTL_MS / 1000) })
-  } catch (err: any) {
-    console.error("[auth/send-code]", err)
-    return NextResponse.json(
-      { error: "server_error", message: err?.message ?? "Unknown error" },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      ok: true,
+      sent: true,
+      ttlSeconds: Math.floor(OTP_TTL_MS / 1000),
+    })
+  } catch (err) {
+    if (err instanceof ZodError) return validationErrorResponse(err)
+    return serverErrorResponse("auth/send-code", err)
   }
 }
