@@ -22,7 +22,6 @@ import {
 } from "date-fns"
 import { pl } from "date-fns/locale"
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Plus } from "lucide-react"
-import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
 import type { TaskCategory } from "@/lib/calendar-types"
 import {
@@ -38,6 +37,7 @@ import {
 } from "@/lib/in-cabinet-days"
 import { formatInCabinetWeekdaysLabel, getCategoryForDate } from "@/lib/visit-category"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
+import { authedJsonPost, authedJsonPatch, getInstantAuthHeaders } from "@/lib/auth-client"
 
 function meetingDateLocal(dateStr: string): Date {
   return parse(dateStr, "yyyy-MM-dd", new Date())
@@ -803,22 +803,18 @@ export function GuestDashboard() {
     const guestEmail = meeting.userEmail ?? user?.email
 
     if (guestEmail) {
-      fetch("/api/n8n/meetings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "meeting.deleted",
-          deletedBy: "user",
-          meetingId: meeting.id,
-          title: meeting.title,
-          description: meeting.description,
-          category: meeting.category,
-          date: meeting.date,
-          time: meeting.time,
-          duration: meeting.duration,
-          userEmail: guestEmail,
-          deletedAt,
-        }),
+      authedJsonPost("/api/n8n/meetings", {
+        event: "meeting.deleted",
+        deletedBy: "user",
+        meetingId: meeting.id,
+        title: meeting.title,
+        description: meeting.description,
+        category: meeting.category,
+        date: meeting.date,
+        time: meeting.time,
+        duration: meeting.duration,
+        userEmail: guestEmail,
+        deletedAt,
       }).catch(() => {})
     }
 
@@ -836,9 +832,10 @@ export function GuestDashboard() {
     if (!user?.id || !user?.email) return
     setIsDeletingAccount(true)
     try {
+      const headers = await getInstantAuthHeaders()
       const res = await fetch("/api/account/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId: user.id, userEmail: user.email }),
       })
       if (!res.ok) {
@@ -1642,49 +1639,45 @@ export function GuestDashboard() {
               }
 
               const nowIso = new Date().toISOString()
-              const { phone, ...meetingFields } = payload
               try {
-                await db.transact(
-                  db.tx.meetings[editing.id].update({
-                    ...meetingFields,
-                    userPhone: phone,
-                    status: "confirmed",
-                    previousDate: null,
-                    previousTime: null,
-                    previousDuration: null,
-                    changeRequestedAt: null,
-                    lastEditedBy: "guest",
-                    updatedAt: nowIso,
-                  }),
-                )
+                const res = await authedJsonPatch(`/api/meetings/${editing.id}`, {
+                  title: payload.title,
+                  description: payload.description,
+                  category: payload.category,
+                  date: payload.date,
+                  time: payload.time,
+                  duration: payload.duration,
+                  phone: payload.phone,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                  alert(data?.message ?? "Nie udało się zaktualizować wizyty.")
+                  return false
+                }
 
                 writeGuestCachedDisplayName(payload.title)
                 if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
-                fetch("/api/n8n/meetings", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    event: "meeting.edited",
-                    editedBy: "user",
-                    meetingId: editing.id,
-                    ...payload,
-                    userPhone: payload.phone,
-                    userEmail: editing.userEmail ?? user?.email,
-                    status: "confirmed",
-                    previousDate: null,
-                    previousTime: null,
-                    previousDuration: null,
-                    changeRequestedAt: null,
-                    updatedAt: nowIso,
-                  }),
+                authedJsonPost("/api/n8n/meetings", {
+                  event: "meeting.edited",
+                  editedBy: "user",
+                  meetingId: editing.id,
+                  ...payload,
+                  userPhone: payload.phone,
+                  userEmail: editing.userEmail ?? user?.email,
+                  status: "confirmed",
+                  previousDate: null,
+                  previousTime: null,
+                  previousDuration: null,
+                  changeRequestedAt: null,
+                  updatedAt: nowIso,
                 }).catch(() => {})
 
                 setShowForm(false)
                 setEditing(null)
               } catch (err: any) {
-                console.error("InstantDB error (guest edit)", err)
-                alert(err?.body?.message ?? err?.message ?? "Nie udało się zaktualizować wizyty.")
+                console.error("Guest meeting update", err)
+                alert(err?.message ?? "Nie udało się zaktualizować wizyty.")
                 return false
               }
             } else {
@@ -1715,38 +1708,36 @@ export function GuestDashboard() {
                 return false
               }
 
-              const meetingId = id()
               const createdAt = new Date().toISOString()
-              const { phone, ...meetingFields } = payload
               try {
-                await db.transact([
-                  (db.tx.meetings as any)[meetingId].create({
-                    ...meetingFields,
-                    userPhone: phone,
-                    createdAt,
-                    userId: user?.id,
-                    userEmail: user?.email,
-                    createdBy: "guest",
-                    lastEditedBy: "guest",
-                    status: "confirmed",
-                  }),
-                ])
+                const res = await authedJsonPost("/api/meetings", {
+                  title: payload.title,
+                  description: payload.description,
+                  category: payload.category,
+                  date: payload.date,
+                  time: payload.time,
+                  duration: payload.duration,
+                  phone: payload.phone,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                  alert(data?.message ?? "Nie udało się zapisać wizyty.")
+                  return false
+                }
+
+                const meetingId = data.meetingId as string
 
                 writeGuestCachedDisplayName(payload.title)
                 if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
-                fetch("/api/n8n/meetings", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    event: "meeting.created",
-                    meetingId,
-                    ...payload,
-                    userPhone: payload.phone,
-                    createdAt,
-                    userId: user?.id,
-                    userEmail: user?.email,
-                  }),
+                authedJsonPost("/api/n8n/meetings", {
+                  event: "meeting.created",
+                  meetingId,
+                  ...payload,
+                  userPhone: payload.phone,
+                  createdAt,
+                  userId: user?.id,
+                  userEmail: user?.email,
                 }).catch(() => {})
 
                 setShowForm(false)
@@ -1758,8 +1749,8 @@ export function GuestDashboard() {
                 } as Meeting)
                 setShowThanks(true)
               } catch (err: any) {
-                console.error("InstantDB error (guest create)", err)
-                alert(err?.body?.message ?? err?.message ?? "Nie udało się zapisać wizyty.")
+                console.error("Guest meeting create", err)
+                alert(err?.message ?? "Nie udało się zapisać wizyty.")
                 return false
               }
             }

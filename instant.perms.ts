@@ -1,9 +1,7 @@
 import type { InstantRules } from "@instantdb/react"
+import { getAdminEmails } from "@/lib/admin-emails"
 
-const adminEmailList = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean)
+const adminEmailList = getAdminEmails()
 
 const adminEmailRuleLiteral =
   adminEmailList.length === 0
@@ -12,8 +10,11 @@ const adminEmailRuleLiteral =
         .map((e) => `'${e.replaceAll("'", "\\'")}'`)
         .join(", ")}]`
 
+const adminBind = {
+  isAdmin: `auth.email in ${adminEmailRuleLiteral}`,
+}
+
 const rules = {
-  // OTP sessions are server-only — no client can read or write them directly
   otpSessions: {
     allow: {
       view: "false",
@@ -21,6 +22,51 @@ const rules = {
       update: "false",
       delete: "false",
     },
+  },
+  allowedUsers: {
+    allow: {
+      view: "auth.id != null && isAdmin",
+      create: "auth.id != null && isAdmin",
+      update: "auth.id != null && isAdmin",
+      delete: "auth.id != null && isAdmin",
+    },
+    bind: adminBind,
+  },
+  scheduleSlots: {
+    allow: {
+      view: "auth.id != null",
+      create: "auth.id != null && isAdmin",
+      update: "auth.id != null && isAdmin",
+      delete: "auth.id != null && isAdmin",
+    },
+    bind: adminBind,
+  },
+  bookingSettings: {
+    allow: {
+      view: "auth.id != null",
+      create: "auth.id != null && isAdmin",
+      update: "auth.id != null && isAdmin",
+      delete: "auth.id != null && isAdmin",
+    },
+    bind: adminBind,
+  },
+  blockedDates: {
+    allow: {
+      view: "auth.id != null",
+      create: "auth.id != null && isAdmin",
+      update: "auth.id != null && isAdmin",
+      delete: "auth.id != null && isAdmin",
+    },
+    bind: adminBind,
+  },
+  blockedSlots: {
+    allow: {
+      view: "auth.id != null",
+      create: "auth.id != null && isAdmin",
+      update: "auth.id != null && isAdmin",
+      delete: "auth.id != null && isAdmin",
+    },
+    bind: adminBind,
   },
   meetings: {
     allow: {
@@ -30,7 +76,7 @@ const rules = {
       delete: "auth.id != null && (isAdmin || isOwner)",
     },
     bind: {
-      isAdmin: `auth.email in ${adminEmailRuleLiteral}`,
+      ...adminBind,
       isOwner: "auth.id != null && auth.id == data.userId",
       isStillOwner: "auth.id != null && auth.id == newData.userId",
     },
@@ -38,4 +84,3 @@ const rules = {
 } satisfies InstantRules
 
 export default rules
-

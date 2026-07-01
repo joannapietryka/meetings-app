@@ -10,7 +10,11 @@ import { GuestDashboard } from "@/components/guest/GuestDashboard"
 import { db } from "@/lib/db"
 import { DAY_SLOTS } from "@/lib/calendar-types"
 
-const mockUser = { id: "guest-user-1", email: "guest@test.com" }
+const mockUser = {
+  id: "guest-user-1",
+  email: "guest@test.com",
+  refresh_token: "test-refresh-token",
+}
 
 jest.mock("@/components/calendar/AddTaskModal", () => ({
   AddTaskModal: (props: {
@@ -197,6 +201,7 @@ describe("GuestDashboard", () => {
     expect(n8nCall).toBeTruthy()
     const [, init] = n8nCall as any
     expect(init?.method).toBe("POST")
+    expect(init?.headers?.Authorization).toBe("Bearer test-refresh-token")
     const body = JSON.parse((init as any).body)
     expect(body.event).toBe("meeting.deleted")
     expect(body.deletedBy).toBe("user")
