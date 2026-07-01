@@ -1100,7 +1100,7 @@ export function GuestDashboard() {
                     isWeekendCell
                       ? "rounded-md sm:rounded-xl min-h-[64px] sm:min-h-[92px] self-stretch items-center justify-center sm:justify-start px-0 sm:px-1 py-1 sm:py-2 text-center"
                       : "rounded-xl min-h-[76px] sm:min-h-[112px] p-1.5 sm:p-2 items-start text-left"
-                  } ${interactiveClass} ${isTodayCell ? "ring-2 ring-[#0C115B]/40" : ""} ${
+                  } ${interactiveClass} ${
                     !inMonth && !canClick ? "text-slate-400" : !inMonth ? "text-slate-600" : ""
                   }`.trim()
 
@@ -1121,7 +1121,9 @@ export function GuestDashboard() {
                       : undefined,
                     border: hasVisit && colors && !showsDisabledVisit
                       ? `1px solid ${colors.border}`
-                      : useWeekendDisabledStyle
+                      : isTodayCell
+                        ? "1.5px solid rgba(12,17,91,0.38)"
+                        : useWeekendDisabledStyle
                         ? "1px solid rgba(255,255,255,0.24)"
                         : hasUnavailableStyle
                         ? "1.5px dashed rgba(239,68,68,0.3)"
@@ -1157,7 +1159,18 @@ export function GuestDashboard() {
                               : "text-xs sm:text-sm"
                           }`}
                         >
-                          {format(day, "d", { locale: pl })}
+                          <span
+                            className={
+                              isTodayCell
+                                ? isWeekendCell
+                                  ? "inline-flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-[#0C115B] text-[8px] sm:text-[10px] text-white font-bold leading-none"
+                                  : "inline-flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-[#0C115B] text-white font-bold leading-none shadow-[0_2px_8px_rgba(12,17,91,0.22)]"
+                                : undefined
+                            }
+                            title={isTodayCell ? "Dziś" : undefined}
+                          >
+                            {format(day, "d", { locale: pl })}
+                          </span>
                         </span>
                         {mineOnDay && colors && !isWeekendCell && (
                           <span
