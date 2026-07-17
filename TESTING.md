@@ -51,6 +51,17 @@ All tests live under the `__tests__` folder:
       - `+ Add meeting` enabled when < 3 meetings.
       - Disabled at 3 meetings and shows *“You can schedule up to 3 meetings.”*.
 
+- `__tests__/api/auth-security.test.ts`
+  - Route protection tests for authenticated server endpoints:
+    - Rejects unauthenticated requests to the n8n meeting proxy.
+    - Rejects disallowed sessions before forwarding to n8n.
+
+- `__tests__/api/n8n-meetings-route.test.ts`
+  - Node-route tests for the n8n webhook proxy:
+    - Forwards validated payloads to the configured webhook URL.
+    - Appends `adminEmails` and optional webhook auth headers.
+    - Returns a clear server error when the webhook URL is missing.
+
 ### Mocks and configuration
 
 - **Jest config**: `jest.config.ts`

@@ -11,7 +11,29 @@ import {
   forbiddenResponse,
 } from "@/lib/api-response"
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit"
-import { n8nMeetingBodySchema } from "@/lib/schemas/n8n-meetings"
+import { n8nMeetingBodySchema, type N8nMeetingBody } from "@/lib/schemas/n8n-meetings"
+
+/** Convert ISO date `YYYY-MM-DD` → display format `DD.MM.YYYY` for n8n. */
+function toWebhookDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-")
+  return `${day}.${month}.${year}`
+}
+
+function formatPayloadDatesForWebhook(body: N8nMeetingBody): N8nMeetingBody {
+  if (body.event === "meeting.edited") {
+    return {
+      ...body,
+      date: toWebhookDate(body.date),
+      previousDate:
+        body.previousDate == null ? body.previousDate : toWebhookDate(body.previousDate),
+    }
+  }
+
+  return {
+    ...body,
+    date: toWebhookDate(body.date),
+  }
+}
 
 export async function POST(req: Request) {
   const rate = enforceRateLimit(req, "n8n:meetings", RATE_LIMITS.meetingsWrite)
@@ -35,7 +57,10 @@ export async function POST(req: Request) {
     const authHeaderValue = process.env.N8N_MEETINGS_AUTH_HEADER_VALUE
 
     const adminEmailsStr = getAdminEmails().join(",")
-    const payload = { ...body, adminEmails: adminEmailsStr }
+    const payload = {
+      ...formatPayloadDatesForWebhook(body),
+      adminEmails: adminEmailsStr,
+    }
 
     const headers: Record<string, string> = { "Content-Type": "application/json" }
     if (authHeaderName && authHeaderValue) {
