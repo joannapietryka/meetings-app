@@ -15,7 +15,12 @@ import { forwardMeetingWebhook } from "@/lib/n8n-meetings-webhook"
 
 type DbMeeting = BookingMeetingRef & {
   userId?: string
+  userEmail?: string
   title?: string
+  description?: string
+  category?: string
+  duration?: number
+  userPhone?: string
 }
 
 type BookingContext = {
@@ -27,7 +32,21 @@ type BookingContext = {
   userMeetings: BookingMeetingRef[]
 }
 
-async function loadBookingContext(userId: string): Promise<BookingContext> {
+function normalizeEmail(email: string | null | undefined): string {
+  return (email ?? "").trim().toLowerCase()
+}
+
+function isMeetingOwnedByUser(
+  meeting: Pick<DbMeeting, "userId" | "userEmail">,
+  user: Pick<User, "id" | "email">,
+): boolean {
+  if (meeting.userId && meeting.userId === user.id) return true
+  const meetingEmail = normalizeEmail(meeting.userEmail)
+  const userEmail = normalizeEmail(user.email)
+  return Boolean(meetingEmail && userEmail && meetingEmail === userEmail)
+}
+
+async function loadBookingContext(user: Pick<User, "id" | "email">): Promise<BookingContext> {
   const result = await instantAdminQuery<{
     meetings: DbMeeting[]
     blockedDates: { date: string }[]
@@ -51,7 +70,7 @@ async function loadBookingContext(userId: string): Promise<BookingContext> {
     blockedSlots.get(slot.date)!.add(slot.time)
   }
 
-  const userMeetings = (result.meetings ?? []).filter((m) => m.userId === userId)
+  const userMeetings = (result.meetings ?? []).filter((m) => isMeetingOwnedByUser(m, user))
 
   return {
     scheduleSlotRecords: result.scheduleSlots ?? [],
@@ -84,7 +103,7 @@ export async function createGuestMeeting(user: User, body: GuestMeetingBody) {
     return { ok: false as const, code: phoneCheck.code, message: phoneCheck.message, status: 409 }
   }
 
-  const ctx = await loadBookingContext(user.id)
+  const ctx = await loadBookingContext(user)
   const limits = validateGuestBookingLimits({
     targetDate: body.date,
     existingMeetings: ctx.userMeetings,
@@ -176,10 +195,10 @@ export async function updateGuestMeeting(
   }
 
   const existingResult = await instantAdminQuery<{ meetings: DbMeeting[] }>({
-    query: { meetings: { $: { where: { id: meetingId } } } },
+    query: { meetings: {} },
   })
-  const existing = existingResult.meetings?.[0]
-  if (!existing || existing.userId !== user.id) {
+  const existing = (existingResult.meetings ?? []).find((m) => m.id === meetingId)
+  if (!existing || !isMeetingOwnedByUser(existing, user)) {
     return {
       ok: false as const,
       code: "not_found",
@@ -188,7 +207,7 @@ export async function updateGuestMeeting(
     }
   }
 
-  const ctx = await loadBookingContext(user.id)
+  const ctx = await loadBookingContext(user)
   const limits = validateGuestBookingLimits({
     targetDate: body.date,
     existingMeetings: ctx.userMeetings,
@@ -216,6 +235,7 @@ export async function updateGuestMeeting(
 
   const nowIso = new Date().toISOString()
   const duration = body.duration ?? SESSION_DURATION
+  const ownerEmail = normalizeEmail(user.email) || normalizeEmail(existing.userEmail) || null
 
   await instantAdminTransact({
     steps: [
@@ -231,6 +251,9 @@ export async function updateGuestMeeting(
           time: body.time,
           duration,
           userPhone: phoneCheck.phone,
+          // Backfill ownership for admin-created visits that only had userEmail.
+          userId: user.id,
+          userEmail: ownerEmail,
           status: "confirmed",
           previousDate: null,
           previousTime: null,
@@ -254,7 +277,7 @@ export async function updateGuestMeeting(
     time: body.time,
     duration,
     userPhone: phoneCheck.phone,
-    userEmail: user.email ?? null,
+    userEmail: ownerEmail,
     status: "confirmed",
     previousDate: null,
     previousTime: null,
