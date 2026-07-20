@@ -103,6 +103,7 @@ describe("POST /api/n8n/meetings", () => {
           createdAt: "2026-03-10T10:00:00.000Z",
           adminEmails: "admin@example.com,other@example.com",
         }),
+        cache: "no-store",
       }),
     )
     await expect(res.json()).resolves.toEqual({ ok: true })

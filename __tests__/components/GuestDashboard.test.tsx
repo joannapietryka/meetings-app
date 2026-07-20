@@ -208,7 +208,7 @@ describe("GuestDashboard", () => {
     expect(body.meetingId).toBe("m1")
   })
 
-  it("fires n8n meeting.edited with editedBy=user when guest saves edit from modal", async () => {
+  it("saves guest meeting edits through /api/meetings (server fires n8n webhook)", async () => {
     mockFetchWithAvailability([])
     const fetchSpy = global.fetch as jest.Mock
 
@@ -234,16 +234,21 @@ describe("GuestDashboard", () => {
     await user.click(screen.getByTestId("modal-save"))
 
     await waitFor(() => {
-      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/n8n/meetings"))).toBe(true)
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/api/meetings/m1") && (init as any)?.method === "PATCH",
+        ),
+      ).toBe(true)
     })
 
-    const n8nCall = fetchSpy.mock.calls.find(([url]) => String(url).includes("/api/n8n/meetings"))
-    expect(n8nCall).toBeTruthy()
-    const [, init] = n8nCall as any
-    const body = JSON.parse((init as any).body)
-    expect(body.event).toBe("meeting.edited")
-    expect(body.editedBy).toBe("user")
-    expect(body.meetingId).toBe("m1")
+    const patchCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes("/api/meetings/m1") && (init as any)?.method === "PATCH",
+    )
+    expect(patchCall).toBeTruthy()
+    const [, init] = patchCall as any
+    expect(init?.headers?.Authorization).toBe("Bearer test-refresh-token")
   })
 
   it("opens AddTaskModal with selected calendar day as defaultDate", async () => {

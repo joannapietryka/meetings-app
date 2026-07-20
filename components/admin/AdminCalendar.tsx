@@ -24,7 +24,7 @@ import {
 import { getAdminCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
 import { snapTimeToFullHour } from "@/lib/time-options"
 import { DayColumn } from "@/components/calendar/DayColumn"
-import { authedJsonPost } from "@/lib/auth-client"
+import { authedJsonGet, authedJsonPost } from "@/lib/auth-client"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
 
 type Meeting = {
@@ -346,7 +346,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     })
   }
 
-  const handleAddMeeting = (payload: {
+  const handleAddMeeting = async (payload: {
     title: string
     description?: string
     category: TaskCategory
@@ -363,6 +363,22 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
     if (payload.category !== expectedCategory) {
       alert("Typ wizyty nie odpowiada wybranemu dniu. Wybierz inną datę lub odśwież stronę.")
       return false
+    }
+
+    const guestEmail = payload.email?.trim().toLowerCase() || undefined
+    let guestUserId: string | undefined
+    if (guestEmail) {
+      try {
+        const res = await authedJsonGet(
+          `/api/admin/users/by-email?email=${encodeURIComponent(guestEmail)}`,
+        )
+        if (res.ok) {
+          const body = (await res.json()) as { userId?: string | null }
+          guestUserId = body.userId ?? undefined
+        }
+      } catch {
+        // Patient may not have an Instant account yet — email ownership still applies.
+      }
     }
 
     if (editing) {
@@ -401,7 +417,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 status: isUserMeeting ? "confirmed" : null,
                 changeRequestedAt: null,
               }),
-          userEmail: payload.email,
+          userEmail: guestEmail ?? null,
+          userId: guestUserId ?? editing.userId ?? null,
           userPhone: payload.phone ?? null,
           lastEditedBy: "admin",
           updatedAt: nowIso,
@@ -416,7 +433,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             title: payload.title,
             description: payload.description,
             category: payload.category,
-            userEmail: payload.email,
+            userEmail: guestEmail,
             userPhone: payload.phone ?? null,
             date: payload.date,
             time: payload.time,
@@ -453,7 +470,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           date: payload.date,
           time: payload.time,
           duration: payload.duration,
-          userEmail: payload.email,
+          userEmail: guestEmail ?? null,
+          userId: guestUserId ?? null,
           userPhone: payload.phone ?? null,
           createdBy: "admin",
           createdAt,
@@ -471,8 +489,9 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             date: payload.date,
             time: payload.time,
             duration: payload.duration,
-            userEmail: payload.email,
+            userEmail: guestEmail,
             userPhone: payload.phone ?? null,
+            userId: guestUserId,
             createdAt,
             lastEditedBy: "admin",
             updatedAt: createdAt,

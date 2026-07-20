@@ -11,6 +11,7 @@ import type { InCabinetDayRecord } from "@/lib/in-cabinet-days"
 import type { ScheduleSlotRecord } from "@/lib/schedule-slots"
 import { formatPhoneForStorage, isValidPhoneNumber } from "@/lib/phone"
 import { SESSION_DURATION } from "@/lib/calendar-types"
+import { forwardMeetingWebhook } from "@/lib/n8n-meetings-webhook"
 
 type DbMeeting = BookingMeetingRef & {
   userId?: string
@@ -135,12 +136,32 @@ export async function createGuestMeeting(user: User, body: GuestMeetingBody) {
     ],
   })
 
+  const webhook = await forwardMeetingWebhook({
+    event: "meeting.created",
+    meetingId,
+    title: body.title,
+    description: body.description,
+    category: body.category,
+    date: body.date,
+    time: body.time,
+    duration,
+    userPhone: phoneCheck.phone,
+    userId: user.id,
+    userEmail: user.email ?? null,
+    createdAt,
+    lastEditedBy: "guest",
+  })
+  if (!webhook.ok) {
+    console.error("[guest meeting.created webhook]", webhook.error, webhook.status)
+  }
+
   return {
     ok: true as const,
     meetingId,
     createdAt,
     duration,
     userPhone: phoneCheck.phone,
+    webhookOk: webhook.ok,
   }
 }
 
@@ -222,10 +243,34 @@ export async function updateGuestMeeting(
     ],
   })
 
+  const webhook = await forwardMeetingWebhook({
+    event: "meeting.edited",
+    editedBy: "user",
+    meetingId,
+    title: body.title,
+    description: body.description,
+    category: body.category,
+    date: body.date,
+    time: body.time,
+    duration,
+    userPhone: phoneCheck.phone,
+    userEmail: user.email ?? null,
+    status: "confirmed",
+    previousDate: null,
+    previousTime: null,
+    previousDuration: null,
+    changeRequestedAt: null,
+    updatedAt: nowIso,
+  })
+  if (!webhook.ok) {
+    console.error("[guest meeting.edited webhook]", webhook.error, webhook.status)
+  }
+
   return {
     ok: true as const,
     updatedAt: nowIso,
     duration,
     userPhone: phoneCheck.phone,
+    webhookOk: webhook.ok,
   }
 }
