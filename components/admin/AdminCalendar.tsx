@@ -55,12 +55,17 @@ function toDateStr(date: Date): string {
 
 
 function isUserOwnedMeeting(m: Meeting): boolean {
-  // Primary signal for new data.
+  // Patient self-booked visit.
   if (m.createdBy === "guest") return true
+
+  // Admin booked on behalf of a patient — still needs confirmation when date/time changes.
+  const hasPatientLink = Boolean(m.userId) || Boolean(m.userEmail?.trim())
+  if (hasPatientLink) return true
+
+  // Admin-only / internal visit with no patient attached.
   if (m.createdBy === "admin") return false
 
   // Backward-compatible fallback for older records that do not have createdBy.
-  if (Boolean(m.userId)) return true
   if (m.lastEditedBy === "guest") return true
   // Legacy data fallback: if ownership is unknown, prefer confirmation flow
   // so admin edits don't silently skip guest confirmation.
