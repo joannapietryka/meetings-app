@@ -1,5 +1,13 @@
 import type { InstantRules } from "@instantdb/react"
-import { getAdminEmails } from "@/lib/admin-emails"
+
+/** Inline allowlist for Instant CLI (no path aliases). Keep in sync with lib/admin-emails.ts. */
+function getAdminEmails(): string[] {
+  const raw = process.env.ADMIN_EMAILS ?? ""
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
 
 const adminEmailList = getAdminEmails()
 
@@ -77,8 +85,11 @@ const rules = {
     },
     bind: {
       ...adminBind,
-      isOwner: "auth.id != null && auth.id == data.userId",
-      isStillOwner: "auth.id != null && auth.id == newData.userId",
+      // Admin-created visits often have userEmail but no userId yet — allow ownership by either.
+      isOwner:
+        "auth.id != null && (auth.id == data.userId || (data.userEmail != null && auth.email == data.userEmail))",
+      isStillOwner:
+        "auth.id != null && (auth.id == newData.userId || (newData.userEmail != null && auth.email == newData.userEmail))",
     },
   },
 } satisfies InstantRules

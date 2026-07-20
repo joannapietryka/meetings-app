@@ -63,3 +63,16 @@ export async function getSessionInfo(user: User): Promise<{
   const isGuestAllowed = isAdmin || (email ? await isGuestEmailAllowed(email) : false)
   return { email, isAdmin, isGuestAllowed }
 }
+
+/** Resolve Instant auth user id by email. Returns null if the patient has never signed up. */
+export async function resolveUserIdByEmail(email: string): Promise<string | null> {
+  const normalized = email.trim().toLowerCase()
+  if (!normalized) return null
+  try {
+    const adminDb = getInstantAdminDb()
+    const user = await adminDb.auth.getUser({ email: normalized })
+    return user?.id ?? null
+  } catch {
+    return null
+  }
+}

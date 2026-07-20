@@ -209,7 +209,16 @@ export function GuestDashboard() {
   const cachedAvailabilitySnapshot = useMemo(() => readGuestAvailabilitySnapshot(), [])
   const user = db.useUser()
   const { isLoading, error, data } = db.useQuery({ meetings: {} })
-  const myMeetings = (data?.meetings ?? []) as Meeting[]
+  const myMeetings = useMemo(() => {
+    const all = (data?.meetings ?? []) as Meeting[]
+    const uid = user?.id
+    const email = (user?.email ?? "").trim().toLowerCase()
+    return all.filter((m) => {
+      if (uid && m.userId === uid) return true
+      if (email && m.userEmail?.trim().toLowerCase() === email) return true
+      return false
+    })
+  }, [data?.meetings, user?.id, user?.email])
 
   const { data: blockedData } = db.useQuery({ blockedDates: {} })
   const blockedDateSet = useMemo(
@@ -1651,7 +1660,6 @@ export function GuestDashboard() {
                 return false
               }
 
-              const nowIso = new Date().toISOString()
               try {
                 const res = await authedJsonPatch(`/api/meetings/${editing.id}`, {
                   title: payload.title,
@@ -1671,20 +1679,6 @@ export function GuestDashboard() {
                 writeGuestCachedDisplayName(payload.title)
                 if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
-                authedJsonPost("/api/n8n/meetings", {
-                  event: "meeting.edited",
-                  editedBy: "user",
-                  meetingId: editing.id,
-                  ...payload,
-                  userPhone: payload.phone,
-                  userEmail: editing.userEmail ?? user?.email,
-                  status: "confirmed",
-                  previousDate: null,
-                  previousTime: null,
-                  previousDuration: null,
-                  changeRequestedAt: null,
-                  updatedAt: nowIso,
-                }).catch(() => {})
 
                 setShowForm(false)
                 setEditing(null)
@@ -1721,7 +1715,6 @@ export function GuestDashboard() {
                 return false
               }
 
-              const createdAt = new Date().toISOString()
               try {
                 const res = await authedJsonPost("/api/meetings", {
                   title: payload.title,
@@ -1743,15 +1736,6 @@ export function GuestDashboard() {
                 writeGuestCachedDisplayName(payload.title)
                 if (payload.phone) writeGuestCachedPhone(payload.phone)
                 await refreshAvailability()
-                authedJsonPost("/api/n8n/meetings", {
-                  event: "meeting.created",
-                  meetingId,
-                  ...payload,
-                  userPhone: payload.phone,
-                  createdAt,
-                  userId: user?.id,
-                  userEmail: user?.email,
-                }).catch(() => {})
 
                 setShowForm(false)
                 setLastCreated({

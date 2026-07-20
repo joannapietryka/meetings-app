@@ -25,6 +25,14 @@ export async function authedJsonPost(url: string, body: unknown): Promise<Respon
   })
 }
 
+export async function authedJsonGet(url: string): Promise<Response> {
+  const headers = await getInstantAuthHeaders()
+  return fetch(url, {
+    method: "GET",
+    headers,
+  })
+}
+
 export async function authedJsonPatch(url: string, body: unknown): Promise<Response> {
   const headers = await getInstantAuthHeaders()
   return fetch(url, {
