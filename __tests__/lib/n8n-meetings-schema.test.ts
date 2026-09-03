@@ -59,6 +59,23 @@ describe("n8n meeting schemas", () => {
     expect(n8nMeetingDeletedSchema.parse(body)).toEqual(body)
   })
 
+  it("accepts meeting.reminder payload for guest email only", () => {
+    const body = {
+      event: "meeting.reminder" as const,
+      meetingId: "m1",
+      title: "Anna Kowalska",
+      category: "online" as const,
+      date: "2026-09-05",
+      time: "10:00",
+      duration: 50,
+      userEmail: "guest@test.com",
+      reminderDaysBefore: 2,
+      targetDate: "2026-09-05",
+      remindedAt: "2026-09-03T07:00:00.000Z",
+    }
+    expect(n8nMeetingBodySchema.parse(body)).toEqual(body)
+  })
+
   it("rejects unknown fields", () => {
     expect(() =>
       n8nMeetingBodySchema.parse({

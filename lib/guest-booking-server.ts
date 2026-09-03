@@ -261,6 +261,8 @@ export async function updateGuestMeeting(
           changeRequestedAt: null,
           lastEditedBy: "guest",
           updatedAt: nowIso,
+          // Allow a new reminder if the visit moved to another day.
+          ...(existing.date !== body.date ? { remindedAt: null } : {}),
         },
       ],
     ],

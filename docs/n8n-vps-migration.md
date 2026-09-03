@@ -99,25 +99,63 @@ Supported event types:
 }
 ```
 
+### `meeting.reminder`
+
+Sent once daily for visits happening in 2 days (`Europe/Warsaw`). Emails go only to the guest (`userEmail`).
+
+The app endpoint stays the same: `GET/POST /api/cron/meeting-reminders` with `Authorization: Bearer $CRON_SECRET`.
+
+Because Vercel Hobby does not include Cron Jobs, trigger this endpoint from **n8n on your VPS**:
+
+1. New workflow: **Schedule Trigger** → every day at `09:00` with timezone `Europe/Warsaw`.
+2. **HTTP Request** node:
+   - Method: `GET`
+   - URL: `https://YOUR-APP-DOMAIN/api/cron/meeting-reminders`
+   - Header: `Authorization: Bearer <CRON_SECRET>`
+3. Keep your existing meetings webhook workflow; when the cron runs, the app posts `meeting.reminder` events into it.
+
+```json
+{
+  "event": "meeting.reminder",
+  "meetingId": "m1",
+  "title": "Anna Kowalska",
+  "description": "First visit",
+  "category": "online",
+  "date": "05.09.2026",
+  "time": "10:00",
+  "duration": 50,
+  "userEmail": "guest@example.com",
+  "userPhone": "+48500123456",
+  "reminderDaysBefore": 2,
+  "targetDate": "2026-09-05",
+  "remindedAt": "2026-09-03T07:00:00.000Z",
+  "adminEmails": "admin@example.com,other@example.com"
+}
+```
+
 ## Recommended n8n workflow shape
 
 Use one public webhook in n8n and branch internally:
 
 ```mermaid
 flowchart TD
-  appProxy[AppProxyApiRoute] --> webhook[N8nWebhookTrigger]
+  schedule[N8nSchedule09Warsaw] --> cronHttp[AppCronReminders]
+  cronHttp --> webhook[N8nMeetingsWebhook]
+  appProxy[AppProxyApiRoute] --> webhook
   webhook --> eventSwitch{event}
   eventSwitch -->|meeting.created| createdFlow[CreatedFlow]
   eventSwitch -->|meeting.edited| editedFlow[EditedFlow]
   eventSwitch -->|meeting.deleted| deletedFlow[DeletedFlow]
+  eventSwitch -->|meeting.reminder| reminderFlow[ReminderToGuest]
 ```
 
 Recommended node layout:
 
-1. `Webhook` node for POST JSON input.
+1. `Webhook` node for POST JSON input (create/edit/delete/reminder events from the app).
 2. `Switch` node on `{{$json.event}}`.
 3. One branch or `Execute Workflow` node per event type.
-4. Shared email or notification helpers only after the event-specific split.
+4. For `meeting.reminder`, send email only to `userEmail` (guest).
+5. Separate Schedule workflow that only calls the app cron endpoint at 09:00 Warsaw.
 
 ## Current app trigger points
 
@@ -125,6 +163,10 @@ The app sends `meeting.created`, `meeting.edited`, and `meeting.deleted` events 
 
 - `components/admin/AdminCalendar.tsx`
 - `components/guest/GuestDashboard.tsx`
+
+Daily reminders are prepared by:
+
+- `app/api/cron/meeting-reminders/route.ts` (triggered by n8n Schedule, not Vercel Cron)
 
 You should not need to change those components if the new n8n workflow keeps the same payload contract.
 
@@ -135,5 +177,6 @@ After configuring the new webhook:
 1. Create a meeting as a guest and confirm the new n8n workflow receives `meeting.created`.
 2. Edit a meeting as a guest and confirm `meeting.edited`.
 3. Create, edit, and delete a meeting as an admin and confirm the expected event arrives each time.
-4. Verify the auth header is required and accepted by the new n8n webhook.
-5. Verify downstream email and workflow behavior on the VPS matches the old automation.
+4. Create a guest visit dated today + 2 days, run the cron endpoint with `CRON_SECRET` (or click Execute on the n8n Schedule workflow), and confirm `meeting.reminder` arrives for the guest only.
+5. Verify the auth header is required and accepted by the new n8n webhook.
+6. Verify downstream email and workflow behavior on the VPS matches the old automation.

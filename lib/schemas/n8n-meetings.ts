@@ -52,10 +52,22 @@ export const n8nMeetingDeletedSchema = z
   })
   .strict()
 
+export const n8nMeetingReminderSchema = z
+  .object({
+    event: z.literal("meeting.reminder"),
+    ...meetingCoreFields,
+    userEmail: z.string().trim().email().max(254),
+    reminderDaysBefore: z.number().int().min(1).max(30),
+    targetDate: dateSchema.optional(),
+    remindedAt: isoTimestampSchema.optional(),
+  })
+  .strict()
+
 export const n8nMeetingBodySchema = z.discriminatedUnion("event", [
   n8nMeetingCreatedSchema,
   n8nMeetingEditedSchema,
   n8nMeetingDeletedSchema,
+  n8nMeetingReminderSchema,
 ])
 
 export type N8nMeetingBody = z.infer<typeof n8nMeetingBodySchema>

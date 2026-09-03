@@ -291,6 +291,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             }),
         lastEditedBy: "admin",
         updatedAt: nowIso,
+        ...(moving.date !== targetDate ? { remindedAt: null } : {}),
       })
     )
       .then(() => {
@@ -427,6 +428,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           userPhone: payload.phone ?? null,
           lastEditedBy: "admin",
           updatedAt: nowIso,
+          ...(editing.date !== payload.date ? { remindedAt: null } : {}),
         }),
       ])
         .then(() => {

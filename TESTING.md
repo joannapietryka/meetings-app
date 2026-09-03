@@ -62,6 +62,15 @@ All tests live under the `__tests__` folder:
     - Appends `adminEmails` and optional webhook auth headers.
     - Returns a clear server error when the webhook URL is missing.
 
+- `__tests__/api/meeting-reminders-cron.test.ts`
+  - Daily reminder cron endpoint (triggered by n8n Schedule on the VPS):
+    - Rejects unauthorized calls.
+    - Sends `meeting.reminder` only to guest visits dated today + 2 days.
+    - Marks `remindedAt` after a successful webhook.
+
+- `__tests__/lib/meeting-reminders.test.ts`
+  - Pure helpers for Warsaw calendar dates and reminder eligibility.
+
 ### Mocks and configuration
 
 - **Jest config**: `jest.config.ts`
