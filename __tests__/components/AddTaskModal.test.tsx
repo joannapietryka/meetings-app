@@ -49,6 +49,11 @@ function renderModal(overrides: Partial<AddTaskModalProps> = {}) {
   return render(<AddTaskModal {...defaultProps} {...overrides} />)
 }
 
+async function fillName(first = "Jan", last = "Kowalski") {
+  if (first) await userEvent.type(screen.getByLabelText(/^imię$/i), first)
+  if (last) await userEvent.type(screen.getByLabelText(/^nazwisko$/i), last)
+}
+
 describe("AddTaskModal", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -72,7 +77,14 @@ describe("AddTaskModal", () => {
     it("prefills name from prefillTitle without entering edit mode", () => {
       renderModal({ prefillTitle: "Jan Kowalski" })
       expect(screen.getByRole("heading", { name: /nowa wizyta/i })).toBeInTheDocument()
-      expect(screen.getByPlaceholderText(/anna kowalska/i)).toHaveValue("Jan Kowalski")
+      expect(screen.getByLabelText(/^imię$/i)).toHaveValue("Jan")
+      expect(screen.getByLabelText(/^nazwisko$/i)).toHaveValue("Kowalski")
+    })
+
+    it("splits a multi-word surname when editing an existing title", () => {
+      renderModal({ editingTaskId: "meeting-1", initialTitle: "Anna Maria Kowalska" })
+      expect(screen.getByLabelText(/^imię$/i)).toHaveValue("Anna")
+      expect(screen.getByLabelText(/^nazwisko$/i)).toHaveValue("Maria Kowalska")
     })
 
     it("prefills phone from prefillPhone when showPhoneField is set", () => {
@@ -85,7 +97,7 @@ describe("AddTaskModal", () => {
     it("shows error for invalid phone and does not call onAdd", async () => {
       const onAdd = jest.fn()
       renderModal({ showPhoneField: true, onAdd })
-      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await fillName()
       await userEvent.type(screen.getByLabelText(/numer telefonu/i), "123")
       await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
       expect(screen.getByText(/poprawny numer telefonu/i)).toBeInTheDocument()
@@ -95,7 +107,7 @@ describe("AddTaskModal", () => {
     it("passes formatted phone to onAdd for valid guest booking", async () => {
       const onAdd = jest.fn()
       renderModal({ showPhoneField: true, onAdd })
-      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await fillName()
       await userEvent.type(screen.getByLabelText(/numer telefonu/i), "500 123 456")
       await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
       expect(onAdd).toHaveBeenCalledWith(
@@ -109,7 +121,7 @@ describe("AddTaskModal", () => {
     it("allows empty phone when requirePhone is false", async () => {
       const onAdd = jest.fn()
       renderModal({ showPhoneField: true, requirePhone: false, onAdd })
-      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await fillName()
       await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
       expect(onAdd).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -129,11 +141,53 @@ describe("AddTaskModal", () => {
       expect(onAdd).not.toHaveBeenCalled()
     })
 
-    it("shows inline error when name is empty and form is submitted", async () => {
+    it("shows inline errors when both name fields are empty", async () => {
       renderModal()
-      const submit = screen.getByRole("button", { name: /rezerwuj wizytę/i })
-      await userEvent.click(submit)
-      expect(screen.getByText(/proszę wpisać imię i nazwisko pacjenta/i)).toBeInTheDocument()
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(screen.getByText("Proszę wpisać imię.")).toBeInTheDocument()
+      expect(screen.getByText("Proszę wpisać nazwisko.")).toBeInTheDocument()
+    })
+
+    it("requires a last name when only the first name is filled", async () => {
+      const onAdd = jest.fn()
+      renderModal({ onAdd })
+      await fillName("Jan", "")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(screen.getByText("Proszę wpisać nazwisko.")).toBeInTheDocument()
+      expect(screen.queryByText("Proszę wpisać imię.")).not.toBeInTheDocument()
+      expect(onAdd).not.toHaveBeenCalled()
+    })
+
+    it("requires a first name when only the last name is filled", async () => {
+      const onAdd = jest.fn()
+      renderModal({ onAdd })
+      await fillName("", "Kowalski")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(screen.getByText("Proszę wpisać imię.")).toBeInTheDocument()
+      expect(screen.queryByText("Proszę wpisać nazwisko.")).not.toBeInTheDocument()
+      expect(onAdd).not.toHaveBeenCalled()
+    })
+
+    it("composes title from first and last name", async () => {
+      const onAdd = jest.fn()
+      renderModal({ onAdd })
+      await fillName("Anna", "Maria Kowalska")
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Anna Maria Kowalska" }),
+      )
+    })
+
+    it("keeps the composed name within 120 characters", async () => {
+      const onAdd = jest.fn()
+      renderModal({ onAdd })
+      fireEvent.change(screen.getByLabelText(/^imię$/i), { target: { value: "A".repeat(60) } })
+      fireEvent.change(screen.getByLabelText(/^nazwisko$/i), { target: { value: "B".repeat(60) } })
+      expect(screen.getByLabelText(/^nazwisko$/i)).toHaveValue("B".repeat(59))
+      await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({ title: `${"A".repeat(60)} ${"B".repeat(59)}` }),
+      )
     })
   })
 
@@ -320,7 +374,7 @@ describe("AddTaskModal", () => {
       const onClose = jest.fn()
       renderModal({ onAdd, onClose })
 
-      await userEvent.type(screen.getByPlaceholderText(/anna kowalska/i), "Jan Kowalski")
+      await fillName()
       await userEvent.click(screen.getByRole("button", { name: /rezerwuj wizytę/i }))
 
       expect(onAdd).toHaveBeenCalled()

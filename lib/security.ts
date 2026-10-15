@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server"
 
 const ORIGIN_PROTECTED_PREFIXES = [
   "/api/account/delete",
+  "/api/admin/allowed-users",
   "/api/n8n/meetings",
   "/api/meetings",
 ] as const

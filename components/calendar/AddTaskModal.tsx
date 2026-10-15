@@ -87,6 +87,26 @@ const CATEGORIES: { value: TaskCategory; label: string }[] = [
 
 type SlotsResolver = (dateStr: string) => string[]
 
+/** Matches `title` max length in the meeting API schema. */
+const TITLE_MAX_LENGTH = 120
+
+/** First word is the given name; the remainder is the surname (keeps multi-word surnames). */
+function splitDisplayName(full: string): { firstName: string; lastName: string } {
+  const trimmed = full.trim().replace(/\s+/g, " ")
+  if (!trimmed) return { firstName: "", lastName: "" }
+  const space = trimmed.indexOf(" ")
+  if (space === -1) return { firstName: trimmed, lastName: "" }
+  return {
+    firstName: trimmed.slice(0, space),
+    lastName: trimmed.slice(space + 1),
+  }
+}
+
+function clampNamePart(value: string, otherLength: number): string {
+  const max = Math.max(0, TITLE_MAX_LENGTH - 1 - otherLength)
+  return value.slice(0, max)
+}
+
 /** True if a 50-min session starting at `time` finishes before the calendar end. */
 function fitsInDay(time: string): boolean {
   const [h, m] = time.split(":").map(Number)
@@ -226,7 +246,9 @@ export function AddTaskModal({
     return availableDates[0]?.dateStr ?? defaultDate
   }, [defaultDate, availableDates, allowSaturdayDates, maxBookingDate])
 
-  const [title, setTitle] = useState(() => (initialTitle ?? prefillTitle ?? "").trim())
+  const [nameParts] = useState(() => splitDisplayName(initialTitle ?? prefillTitle ?? ""))
+  const [firstName, setFirstName] = useState(nameParts.firstName)
+  const [lastName, setLastName] = useState(nameParts.lastName)
   const [description, setDescription] = useState(initialDescription ?? "")
   const [category, setCategory] = useState<TaskCategory>(() =>
     resolveCategoryForModal(
@@ -239,7 +261,9 @@ export function AddTaskModal({
   )
   const [selectedDate, setSelectedDate] = useState(validDefaultDate)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [firstNameError, setFirstNameError] = useState<string | null>(null)
+  const [lastNameError, setLastNameError] = useState<string | null>(null)
+  const [nameLengthError, setNameLengthError] = useState<string | null>(null)
   const [email, setEmail] = useState(initialEmail ?? "")
   const [emailError, setEmailError] = useState<string | null>(null)
   const [phone, setPhone] = useState(() => (initialPhone ?? prefillPhone ?? "").trim())
@@ -473,8 +497,15 @@ export function AddTaskModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
-    if (!title.trim()) {
-      setNameError("Proszę wpisać imię i nazwisko pacjenta.")
+    const trimmedFirst = firstName.trim()
+    const trimmedLast = lastName.trim()
+    setFirstNameError(trimmedFirst ? null : "Proszę wpisać imię.")
+    setLastNameError(trimmedLast ? null : "Proszę wpisać nazwisko.")
+    if (!trimmedFirst || !trimmedLast) return
+
+    const composedTitle = `${trimmedFirst} ${trimmedLast}`
+    if (composedTitle.length > TITLE_MAX_LENGTH) {
+      setNameLengthError("Imię i nazwisko razem mogą mieć najwyżej 120 znaków.")
       return
     }
 
@@ -526,7 +557,9 @@ export function AddTaskModal({
       return
     }
     setIsSubmitting(true)
-    setNameError(null)
+    setFirstNameError(null)
+    setLastNameError(null)
+    setNameLengthError(null)
     setEmailError(null)
     setPhoneError(null)
     const resolvedCategory = resolveCategoryForModal(
@@ -539,7 +572,7 @@ export function AddTaskModal({
     let result: void | boolean
     try {
       result = await onAdd({
-        title: title.trim(),
+        title: composedTitle,
         description: description.trim() || undefined,
         category: resolvedCategory,
         date: selectedDate,
@@ -631,30 +664,64 @@ export function AddTaskModal({
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Name */}
           <div>
             <label
-              htmlFor="task-title"
+              htmlFor="task-first-name"
               className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
             >
-              Imię i nazwisko pacjenta
+              Imię
             </label>
             <input
-              id="task-title"
-              name="title"
+              id="task-first-name"
+              name="firstName"
               autoFocus
-              value={title}
+              value={firstName}
+              maxLength={Math.max(0, TITLE_MAX_LENGTH - 1 - lastName.trim().length)}
               onChange={(e) => {
-                setTitle(e.target.value)
-                if (nameError) setNameError(null)
+                setFirstName(clampNamePart(e.target.value, lastName.trim().length))
+                if (firstNameError) setFirstNameError(null)
+                if (nameLengthError) setNameLengthError(null)
               }}
-              placeholder="e.g. Anna Kowalska"
+              placeholder="Anna"
               className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
               style={inputStyle}
             />
-            {nameError && (
+            {firstNameError && (
               <p className="mt-1 text-[11px] text-red-600 font-sans">
-                {nameError}
+                {firstNameError}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label
+              htmlFor="task-last-name"
+              className="block text-slate-800 text-xs font-semibold mb-1.5 font-sans uppercase tracking-wide"
+            >
+              Nazwisko
+            </label>
+            <input
+              id="task-last-name"
+              name="lastName"
+              value={lastName}
+              maxLength={Math.max(0, TITLE_MAX_LENGTH - 1 - firstName.trim().length)}
+              onChange={(e) => {
+                setLastName(clampNamePart(e.target.value, firstName.trim().length))
+                if (lastNameError) setLastNameError(null)
+                if (nameLengthError) setNameLengthError(null)
+              }}
+              placeholder="Kowalska"
+              className="w-full rounded-xl px-3 py-2.5 text-sm font-sans placeholder:text-slate-400 focus:border-slate-300 transition-colors"
+              style={inputStyle}
+            />
+            {lastNameError && (
+              <p className="mt-1 text-[11px] text-red-600 font-sans">
+                {lastNameError}
+              </p>
+            )}
+            {nameLengthError && (
+              <p className="mt-1 text-[11px] text-red-600 font-sans">
+                {nameLengthError}
               </p>
             )}
           </div>

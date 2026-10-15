@@ -1,4 +1,5 @@
 import {
+  n8nAccessGrantedSchema,
   n8nMeetingBodySchema,
   n8nMeetingCreatedSchema,
   n8nMeetingDeletedSchema,
@@ -74,6 +75,15 @@ describe("n8n meeting schemas", () => {
       remindedAt: "2026-09-03T07:00:00.000Z",
     }
     expect(n8nMeetingBodySchema.parse(body)).toEqual(body)
+  })
+
+  it("accepts access.granted payload", () => {
+    const body = {
+      event: "access.granted" as const,
+      userEmail: "guest@test.com",
+      grantedAt: "2026-10-15T12:00:00.000Z",
+    }
+    expect(n8nAccessGrantedSchema.parse(body)).toEqual(body)
   })
 
   it("rejects unknown fields", () => {

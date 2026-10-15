@@ -190,7 +190,7 @@ describe("GuestDashboard", () => {
     ])
 
     render(<GuestDashboard />)
-    const deleteButton = screen.getByRole("button", { name: /^usuń$/i })
+    const deleteButton = screen.getByRole("button", { name: /^anuluj wizytę$/i })
     await user.click(deleteButton)
 
     const yesButton = await screen.findByRole("button", { name: /^tak$/i })
@@ -226,7 +226,7 @@ describe("GuestDashboard", () => {
 
     render(<GuestDashboard />)
 
-    const editButton = screen.getByRole("button", { name: /edytuj/i })
+    const editButton = screen.getByRole("button", { name: /^zmień termin$/i })
     await user.click(editButton)
 
     expect(screen.getByTestId("add-task-modal")).toBeInTheDocument()
@@ -379,7 +379,7 @@ describe("GuestDashboard", () => {
 
     expect(screen.getByText(/miniona wizyta/i)).toBeInTheDocument()
     expect(screen.getByText(/minęła/i)).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^edytuj$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^zmień termin$/i })).not.toBeInTheDocument()
   })
 
   it("loads past visits in batches of 5 with Zobacz więcej", async () => {

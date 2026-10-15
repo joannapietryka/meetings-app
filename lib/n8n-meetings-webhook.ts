@@ -1,5 +1,5 @@
 import { getAdminEmails } from "@/lib/admin-emails"
-import type { N8nMeetingBody } from "@/lib/schemas/n8n-meetings"
+import type { N8nWebhookBody } from "@/lib/schemas/n8n-meetings"
 
 /** Convert ISO date `YYYY-MM-DD` → display format `DD.MM.YYYY` for n8n. */
 export function toWebhookDate(isoDate: string): string {
@@ -7,7 +7,9 @@ export function toWebhookDate(isoDate: string): string {
   return `${day}.${month}.${year}`
 }
 
-export function formatPayloadDatesForWebhook(body: N8nMeetingBody): N8nMeetingBody {
+export function formatPayloadDatesForWebhook(body: N8nWebhookBody): N8nWebhookBody {
+  if (body.event === "access.granted") return body
+
   if (body.event === "meeting.edited") {
     return {
       ...body,
@@ -32,7 +34,7 @@ export type ForwardMeetingWebhookResult =
  * Returns a result instead of throwing so callers can decide whether to fail the request.
  */
 export async function forwardMeetingWebhook(
-  body: N8nMeetingBody,
+  body: N8nWebhookBody,
 ): Promise<ForwardMeetingWebhookResult> {
   const webhookUrl = process.env.N8N_MEETINGS_WEBHOOK_URL
   if (!webhookUrl) {

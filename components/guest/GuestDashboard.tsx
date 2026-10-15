@@ -1387,7 +1387,7 @@ export function GuestDashboard() {
                 <li
                   key={m.id}
                   aria-disabled={isPastVisit || undefined}
-                  className={`rounded-2xl px-3 py-3 sm:px-4 sm:py-4 flex flex-col gap-3 sm:gap-4 md:flex-row md:items-center md:justify-between ${
+                  className={`rounded-2xl px-3 py-3 sm:px-4 sm:py-4 flex flex-col gap-3 sm:gap-4 ${
                     isPastVisit ? "pointer-events-none select-none" : ""
                   }`}
                   style={{
@@ -1404,8 +1404,8 @@ export function GuestDashboard() {
                       : "0 4px 12px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.4)",
                   }}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
                       <span
                         className="w-2 h-2 rounded-full shrink-0"
                         style={{ backgroundColor: colors.dot, opacity: isPastVisit ? 0.75 : 1 }}
@@ -1431,9 +1431,41 @@ export function GuestDashboard() {
                         </span>
                       )}
                     </div>
-                    <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch gap-2">
+                    {!isPastVisit && (
+                    <div className="flex gap-2 w-full sm:w-auto shrink-0">
+                      <button
+                        type="button"
+                        className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+                        style={{
+                          backgroundColor: "#0C115B",
+                          boxShadow: "0 3px 10px rgba(12,17,91,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+                          border: "1px solid rgba(12,17,91,0.6)",
+                        }}
+                        onClick={() => {
+                          setEditing(m)
+                          setModalDefaultDate(m.date)
+                          setShowForm(true)
+                        }}
+                      >
+                        Zmień termin
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          deleteButtonRef.current = e.currentTarget
+                          setDeletingMeeting(m)
+                        }}
+                      >
+                        Anuluj wizytę
+                      </button>
+                    </div>
+                    )}
+                  </div>
+                  <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,3fr)_minmax(0,1fr)_minmax(0,1fr)]">
                       <div
-                        className="flex items-center gap-3 rounded-xl px-3 py-2.5 w-full min-w-0 sm:min-w-[220px] sm:flex-1"
+                        className="flex items-center gap-3 rounded-xl px-3 py-2.5 w-full min-w-0"
                         style={{
                           background: isPastVisit ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.68)",
                           border: isPastVisit
@@ -1466,7 +1498,7 @@ export function GuestDashboard() {
                       <div className="flex gap-2 w-full sm:contents">
                         {m.time && (
                           <div
-                            className="flex items-center gap-3 rounded-xl px-3 py-2.5 min-w-0 flex-1 sm:min-w-[145px] sm:flex-none"
+                            className="flex flex-1 basis-0 items-center gap-3 rounded-xl px-3 py-2.5 min-w-0 w-full"
                             style={{
                               background: isPastVisit ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.82)",
                               border: isPastVisit
@@ -1493,7 +1525,7 @@ export function GuestDashboard() {
                         )}
                         {m.duration ? (
                           <div
-                            className="inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium sm:self-auto"
+                            className="inline-flex flex-1 basis-0 w-full min-w-0 items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium"
                             style={{
                               background: "rgba(255,255,255,0.45)",
                               border: isPastVisit
@@ -1507,38 +1539,6 @@ export function GuestDashboard() {
                         ) : null}
                       </div>
                     </div>
-                  </div>
-                  {!isPastVisit && (
-                  <div className="flex gap-2 self-stretch sm:self-start w-full sm:w-auto">
-                    <button
-                      type="button"
-                      className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-white transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
-                      style={{
-                        backgroundColor: "#0C115B",
-                        boxShadow: "0 3px 10px rgba(12,17,91,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
-                        border: "1px solid rgba(12,17,91,0.6)",
-                      }}
-                      onClick={() => {
-                        setEditing(m)
-                        setModalDefaultDate(m.date)
-                        setShowForm(true)
-                      }}
-                    >
-                      Edytuj
-                    </button>
-                    <button
-                      type="button"
-                      className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold font-sans text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        deleteButtonRef.current = e.currentTarget
-                        setDeletingMeeting(m)
-                      }}
-                    >
-                      Usuń
-                    </button>
-                  </div>
-                  )}
                 </li>
               )})}
             </ul>
