@@ -6,6 +6,7 @@ import { pl } from "date-fns/locale"
 import { ChevronLeft, Plus, X, CalendarDays, Users, Ban } from "lucide-react"
 import { id } from "@instantdb/react"
 import { db } from "@/lib/db"
+import { authedJsonPost } from "@/lib/auth-client"
 import {
   findScheduleVersionId,
   getNextScheduleEffectiveFrom,
@@ -181,10 +182,11 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
   // --- Allowed users ---
   const [newEmail, setNewEmail] = useState("")
   const [emailError, setEmailError] = useState("")
+  const [addingUser, setAddingUser] = useState(false)
 
-  const addUser = () => {
+  const addUser = async () => {
     const email = newEmail.trim().toLowerCase()
-    if (!email) return
+    if (!email || addingUser) return
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setEmailError("Nieprawidłowy adres e-mail")
       return
@@ -193,11 +195,25 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
       setEmailError("Ten adres jest już na liście")
       return
     }
-    db.transact(
-      (db.tx.allowedUsers as any)[id()].create({ email, createdAt: new Date().toISOString() }),
-    )
-    setNewEmail("")
+
+    setAddingUser(true)
     setEmailError("")
+    try {
+      const res = await authedJsonPost("/api/admin/allowed-users", { email })
+      const data = (await res.json().catch(() => ({}))) as { message?: string; notified?: boolean }
+      if (!res.ok) {
+        setEmailError(data.message ?? "Nie udało się przyznać dostępu")
+        return
+      }
+      setNewEmail("")
+      if (data.notified === false) {
+        setEmailError("Dostęp został zapisany, ale nie udało się wysłać wiadomości.")
+      }
+    } catch {
+      setEmailError("Nie udało się przyznać dostępu")
+    } finally {
+      setAddingUser(false)
+    }
   }
 
   const removeUser = (userId: string) => {
@@ -368,8 +384,10 @@ export function AdminSettings({ onBack }: AdminSettingsProps) {
                 style={inputStyle}
               />
               <button
+                type="button"
                 onClick={addUser}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all hover:-translate-y-0.5"
+                disabled={addingUser}
+                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold font-sans text-white transition-all hover:-translate-y-0.5 disabled:opacity-60"
                 style={{ backgroundColor: "#0C115B", border: "1px solid rgba(12,17,91,0.6)" }}
               >
                 <Plus className="w-3.5 h-3.5" />

@@ -11,6 +11,10 @@ export const verifyCodeBodySchema = z.object({
   code: z.string().trim().regex(/^\d{6}$/, "Code must be 6 digits"),
 })
 
+export const grantAccessBodySchema = z.object({
+  email: emailSchema,
+})
+
 export const deleteAccountBodySchema = z.object({
   userId: z.string().trim().min(1),
   userEmail: emailSchema,

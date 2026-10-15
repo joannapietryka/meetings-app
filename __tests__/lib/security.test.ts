@@ -14,6 +14,7 @@ function makeRequest(url: string, init: { method?: string; headers?: Record<stri
 describe("security helpers", () => {
   it("requires origin check for mutating protected routes", () => {
     expect(requiresOriginCheck("/api/meetings", "POST")).toBe(true)
+    expect(requiresOriginCheck("/api/admin/allowed-users", "POST")).toBe(true)
     expect(requiresOriginCheck("/api/meetings/abc", "PATCH")).toBe(true)
     expect(requiresOriginCheck("/api/auth/send-code", "POST")).toBe(false)
     expect(requiresOriginCheck("/api/meetings", "GET")).toBe(false)

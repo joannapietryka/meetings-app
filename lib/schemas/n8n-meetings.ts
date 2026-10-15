@@ -63,6 +63,14 @@ export const n8nMeetingReminderSchema = z
   })
   .strict()
 
+export const n8nAccessGrantedSchema = z
+  .object({
+    event: z.literal("access.granted"),
+    userEmail: z.string().trim().email().max(254),
+    grantedAt: isoTimestampSchema,
+  })
+  .strict()
+
 export const n8nMeetingBodySchema = z.discriminatedUnion("event", [
   n8nMeetingCreatedSchema,
   n8nMeetingEditedSchema,
@@ -71,3 +79,5 @@ export const n8nMeetingBodySchema = z.discriminatedUnion("event", [
 ])
 
 export type N8nMeetingBody = z.infer<typeof n8nMeetingBodySchema>
+export type N8nAccessGrantedBody = z.infer<typeof n8nAccessGrantedSchema>
+export type N8nWebhookBody = N8nMeetingBody | N8nAccessGrantedBody
