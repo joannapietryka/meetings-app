@@ -24,6 +24,22 @@ export function slotFitsInCalendar(
   return timeToMinutes(startTime) + durationMinutes <= CALENDAR_END_HOUR * 60
 }
 
+/** True when a session starting at `slot` overlaps any meeting on the same day. */
+export function slotOverlapsTasks(
+  slot: string,
+  tasks: Array<{ time?: string | null; duration?: number | null }>,
+  slotDuration: number = SESSION_DURATION,
+): boolean {
+  const start = timeToMinutes(slot)
+  if (Number.isNaN(start)) return false
+  return tasks.some((task) => {
+    if (!task.time) return false
+    const otherStart = timeToMinutes(task.time)
+    if (Number.isNaN(otherStart)) return false
+    return doIntervalsOverlap(start, slotDuration, otherStart, task.duration ?? SESSION_DURATION)
+  })
+}
+
 /** True when `newSlot` overlaps any existing 50-min session on the same day. */
 export function conflictsWithExistingSlots(
   newSlot: string,

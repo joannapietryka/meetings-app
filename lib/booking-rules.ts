@@ -1,4 +1,4 @@
-import { addDays, addHours, format, isAfter, isBefore, isWeekend, parse, startOfDay } from "date-fns"
+import { addDays, addHours, addMonths, format, isAfter, isBefore, isWeekend, parse, startOfDay } from "date-fns"
 import {
   CALENDAR_END_HOUR,
   SESSION_DURATION,
@@ -6,9 +6,10 @@ import {
 } from "@/lib/calendar-types"
 import { resolveInCabinetWeekdaysForDate, type InCabinetDayRecord } from "@/lib/in-cabinet-days"
 import { resolveSlotsForDate, type ScheduleSlotRecord } from "@/lib/schedule-slots"
+import { slotOverlapsTasks } from "@/lib/slot-conflicts"
 import { getCategoryForDate } from "@/lib/visit-category"
 
-export const GUEST_BOOKING_HORIZON_DAYS = 30
+export const GUEST_BOOKING_HORIZON_MONTHS = 2
 export const GUEST_MIN_LEAD_HOURS = 2
 
 export type BookingMeetingRef = {
@@ -48,7 +49,7 @@ export function getGuestBookingWindow(now = new Date()) {
   const today = startOfDay(now)
   return {
     today,
-    maxBookingDate: addDays(today, GUEST_BOOKING_HORIZON_DAYS),
+    maxBookingDate: addMonths(today, GUEST_BOOKING_HORIZON_MONTHS),
     minBookingDateTime: addHours(now, GUEST_MIN_LEAD_HOURS),
   }
 }
@@ -121,7 +122,7 @@ export function validateGuestSlot(params: {
   inCabinetDayRecords: InCabinetDayRecord[]
   blockedDates: Set<string>
   blockedSlots: Map<string, Set<string>>
-  takenMeetings: Array<{ id: string; date: string; time?: string }>
+  takenMeetings: Array<{ id: string; date: string; time?: string; duration?: number | null }>
   excludeMeetingId?: string
   now?: Date
 }): BookingLimitResult {
@@ -176,7 +177,7 @@ export function validateGuestSlot(params: {
     (meeting) =>
       meeting.id !== params.excludeMeetingId &&
       meeting.date === params.date &&
-      meeting.time === params.time,
+      slotOverlapsTasks(params.time, [meeting]),
   )
   if (taken) {
     return { ok: false, code: "slot_taken", message: "Ten termin został właśnie zarezerwowany." }

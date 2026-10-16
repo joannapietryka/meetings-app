@@ -3,7 +3,8 @@ import {
   getMonthKey,
   sessionFitsInDay,
   validateGuestBookingLimits,
-  GUEST_BOOKING_HORIZON_DAYS,
+  GUEST_BOOKING_HORIZON_MONTHS,
+  getGuestBookingWindow,
 } from "@/lib/booking-rules"
 import { SESSION_DURATION, CALENDAR_END_HOUR } from "@/lib/calendar-types"
 
@@ -67,7 +68,11 @@ describe("booking-rules", () => {
     })
   })
 
-  it("exposes guest booking horizon", () => {
-    expect(GUEST_BOOKING_HORIZON_DAYS).toBe(30)
+  it("exposes guest booking horizon of two months", () => {
+    expect(GUEST_BOOKING_HORIZON_MONTHS).toBe(2)
+    const window = getGuestBookingWindow(new Date("2026-06-25T12:00:00"))
+    expect(window.maxBookingDate.getFullYear()).toBe(2026)
+    expect(window.maxBookingDate.getMonth()).toBe(7)
+    expect(window.maxBookingDate.getDate()).toBe(25)
   })
 })
