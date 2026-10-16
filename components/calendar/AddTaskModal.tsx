@@ -5,7 +5,6 @@ import { X } from "lucide-react"
 import {
   format,
   addDays,
-  addMonths,
   startOfDay,
   isWeekend,
   isBefore,
@@ -28,7 +27,9 @@ import {
   type InCabinetDayRecord,
 } from "@/lib/in-cabinet-days"
 import { getAdminCategoryForDate, getCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
+import { getCalendarViewRange } from "@/lib/calendar-view-range"
 import { generateFiveMinuteTimeOptions, snapTimeToFullHour } from "@/lib/time-options"
+import { slotOverlapsTasks } from "@/lib/slot-conflicts"
 import { TimePickerInput } from "@/components/calendar/TimePickerInput"
 import { formatPhoneForStorage, isValidPhoneNumber } from "@/lib/phone"
 
@@ -202,7 +203,7 @@ export function AddTaskModal({
   const now = useMemo(() => new Date(), [])
   const today = useMemo(() => startOfDay(now), [now])
   const maxBookingDate = useMemo(
-    () => (maxBookableDateProp ? startOfDay(maxBookableDateProp) : addMonths(today, 1)),
+    () => (maxBookableDateProp ? startOfDay(maxBookableDateProp) : getCalendarViewRange(today).maxBookingDate),
     [today, maxBookableDateProp],
   )
   const availableDates = useMemo(
@@ -224,9 +225,14 @@ export function AddTaskModal({
     return true
   }
 
-  // Two 50-min sessions conflict if their start times are identical (slots are spaced >50 min apart)
-  const isSlotConflicting = (startSlot: string, blocked: Set<string>) => {
-    return blocked.has(startSlot)
+  // A 50-min session blocks every slot it overlaps, not only the same start time.
+  const isSlotConflicting = (dateStr: string, startSlot: string) => {
+    const tasks = existingTasks.filter((task) => {
+      if (task.date !== dateStr || !task.time) return false
+      if (isEditing && editingTaskId && task.id === editingTaskId) return false
+      return true
+    })
+    return slotOverlapsTasks(startSlot, tasks)
   }
 
   const isAdminSlotBlocked = (dateStr: string, slot: string) =>
@@ -269,14 +275,13 @@ export function AddTaskModal({
   const [phone, setPhone] = useState(() => (initialPhone ?? prefillPhone ?? "").trim())
   const [phoneError, setPhoneError] = useState<string | null>(null)
 
-  // Initialise time: prefer defaultTime if it's a valid slot for the date, else pick first slot
+  // Keep the meeting's own time even when it is not one of the published slots.
   const [time, setTime] = useState(() => {
     if (allowSaturdayDates && isSaturdayDate(validDefaultDate)) {
       return defaultTime ? snapTimeToFullHour(defaultTime) : ""
     }
-    const dayTimeSlots = resolveSlots(validDefaultDate)
-    if (defaultTime && dayTimeSlots.includes(defaultTime)) return defaultTime
-    return dayTimeSlots[0] ?? ""
+    if (defaultTime) return defaultTime
+    return resolveSlots(validDefaultDate)[0] ?? ""
   })
 
   const isSaturdaySelected = isSaturdayDate(selectedDate)
@@ -284,45 +289,21 @@ export function AddTaskModal({
   const isValidEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
-  // blocked start times per date (exact meeting start times of other sessions)
-  const blockedSlotsByDate = useMemo(() => {
-    const map = new Map<string, Set<string>>()
-    const dateStrs = new Set(availableDates.map((d) => d.dateStr))
-    if (allowSaturdayDates && isSaturdayDate(selectedDate)) {
-      dateStrs.add(selectedDate)
-    }
-    for (const dateStr of dateStrs) {
-      const blocked = new Set<string>()
-      existingTasks
-        .filter((t) => t.date === dateStr)
-        .filter((t) => {
-          if (!isEditing || !editingTaskId) return true
-          return t.id !== editingTaskId
-        })
-        .forEach((task) => {
-          if (task.time) blocked.add(task.time)
-        })
-      map.set(dateStr, blocked)
-    }
-    return map
-  }, [availableDates, existingTasks, isEditing, editingTaskId, allowSaturdayDates, selectedDate])
-
-  const blockedSlots = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
-  const allSlotsForSelectedDate = useMemo(
-    () => (selectedDate ? resolveSlots(selectedDate) : []),
-    [selectedDate, resolveSlots],
-  )
+  const allSlotsForSelectedDate = useMemo(() => {
+    const slots = selectedDate ? [...resolveSlots(selectedDate)] : []
+    if (time && !slots.includes(time)) slots.push(time)
+    return slots.sort((a, b) => a.localeCompare(b))
+  }, [selectedDate, resolveSlots, time])
 
   const freeSlotsByDate = useMemo(() => {
     const map = new Map<string, string[]>()
 
     for (const { dateStr } of availableDates) {
-      const blocked = blockedSlotsByDate.get(dateStr) ?? new Set<string>()
       const freeSlots = resolveSlots(dateStr).filter(
         (slot) =>
           isSlotWithinBookingWindow(dateStr, slot) &&
           fitsInDay(slot) &&
-          !isSlotConflicting(slot, blocked) &&
+          !isSlotConflicting(dateStr, slot) &&
           !isAdminSlotBlocked(dateStr, slot),
       )
 
@@ -330,7 +311,7 @@ export function AddTaskModal({
     }
 
     return map
-  }, [availableDates, blockedSlotsByDate, resolveSlots, adminBlockedSlots, now, maxBookingDate])
+  }, [availableDates, existingTasks, isEditing, editingTaskId, resolveSlots, adminBlockedSlots, now, maxBookingDate])
 
   const freeSlotsForSelectedDate = freeSlotsByDate.get(selectedDate) ?? []
   const hasFreeSlotsForSelectedDate = freeSlotsForSelectedDate.length > 0
@@ -339,19 +320,20 @@ export function AddTaskModal({
 
   const freeSaturdaySlots = useMemo(() => {
     if (!isSaturdaySelected) return []
-    const blocked = blockedSlotsByDate.get(selectedDate) ?? new Set<string>()
     return saturdayTimeOptions.filter(
       (slot) =>
         fitsInDay(slot) &&
         isSlotWithinBookingWindow(selectedDate, slot) &&
         !isAdminSlotBlocked(selectedDate, slot) &&
-        !isSlotConflicting(slot, blocked),
+        !isSlotConflicting(selectedDate, slot),
     )
   }, [
     isSaturdaySelected,
     selectedDate,
     saturdayTimeOptions,
-    blockedSlotsByDate,
+    existingTasks,
+    isEditing,
+    editingTaskId,
     now,
     maxBookingDate,
     adminBlockedSlots,
@@ -362,11 +344,13 @@ export function AddTaskModal({
     if (!fitsInDay(time)) return false
     if (!isSlotWithinBookingWindow(selectedDate, time)) return false
     if (isAdminSlotBlocked(selectedDate, time)) return false
-    if (isSlotConflicting(time, blockedSlots)) return false
+    if (isSlotConflicting(selectedDate, time)) return false
     return true
-  }, [isSaturdaySelected, time, selectedDate, blockedSlots, now, maxBookingDate, adminBlockedSlots])
+  }, [isSaturdaySelected, time, selectedDate, existingTasks, isEditing, editingTaskId, now, maxBookingDate, adminBlockedSlots])
 
-  const canSubmitTime = isSaturdaySelected ? isSaturdayTimeValid : hasFreeSlotsForSelectedDate
+  const canSubmitTime = isSaturdaySelected
+    ? isSaturdayTimeValid
+    : hasFreeSlotsForSelectedDate || (isEditing && Boolean(time))
 
   // Auto-prefill date+time when opening a new booking: prefer calendar-chosen day, else first available.
   const didInitialPrefill = useRef(false)
@@ -382,10 +366,7 @@ export function AddTaskModal({
           fitsInDay(slot) &&
           isSlotWithinBookingWindow(defaultDate, slot) &&
           !isAdminSlotBlocked(defaultDate, slot) &&
-          !isSlotConflicting(
-            slot,
-            blockedSlotsByDate.get(defaultDate) ?? new Set<string>(),
-          ),
+          !isSlotConflicting(defaultDate, slot),
       )
       if (firstFree) setTime(firstFree)
       didInitialPrefill.current = true
@@ -414,7 +395,7 @@ export function AddTaskModal({
       }
     }
     didInitialPrefill.current = true
-  }, [isEditing, defaultTime, defaultDate, availableDates, freeSlotsByDate, allowSaturdayDates, saturdayTimeOptions, blockedSlotsByDate])
+  }, [isEditing, defaultTime, defaultDate, availableDates, freeSlotsByDate, allowSaturdayDates, saturdayTimeOptions, existingTasks, editingTaskId])
 
   // When date changes, validate current time is still a valid slot for the new day
   const prevSelectedDateRef = useRef<string | null>(null)
@@ -476,8 +457,8 @@ export function AddTaskModal({
 
   const wouldConflict = useMemo(() => {
     if (!time) return false
-    return isSlotConflicting(time, blockedSlots)
-  }, [time, blockedSlots])
+    return isSlotConflicting(selectedDate, time)
+  }, [time, selectedDate, existingTasks, isEditing, editingTaskId])
 
   const dateEnabledMap = useMemo(() => {
     const map = new Map<string, boolean>()
@@ -845,7 +826,8 @@ export function AddTaskModal({
                 </option>
               )}
               {allSlotsForSelectedDate.map((slot) => {
-                const isAvailable = freeSlotsForSelectedDate.includes(slot)
+                const isAvailable =
+                  freeSlotsForSelectedDate.includes(slot) || (isEditing && slot === time)
                 return (
                 <option key={slot} value={slot} disabled={!isAvailable}>
                   {isAvailable ? slot : `${slot} (niedostępny)`}

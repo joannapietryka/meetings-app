@@ -2,12 +2,19 @@ import {
   conflictsWithExistingSlots,
   getScheduleSlotError,
   slotFitsInCalendar,
+  slotOverlapsTasks,
 } from "@/lib/slot-conflicts"
 
 describe("slot-conflicts", () => {
   it("detects overlap between 10:15 and 10:30 (50-min sessions)", () => {
     expect(conflictsWithExistingSlots("10:30", ["10:15"])).toBe(true)
     expect(conflictsWithExistingSlots("10:15", ["10:30"])).toBe(true)
+  })
+
+  it("treats a 10:00 visit as blocking the 10:15 slot", () => {
+    expect(slotOverlapsTasks("10:15", [{ time: "10:00" }])).toBe(true)
+    expect(slotOverlapsTasks("09:00", [{ time: "10:00" }])).toBe(false)
+    expect(slotOverlapsTasks("11:15", [{ time: "10:00" }])).toBe(false)
   })
 
   it("allows back-to-back slots with exactly 50 minutes between starts", () => {

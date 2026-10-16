@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState, useEffect } from "react"
-import { addDays, addHours, addMonths, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
+import { addDays, addHours, addWeeks, format, isAfter, isBefore, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns"
 import { pl } from "date-fns/locale"
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Ban, Settings } from "lucide-react"
 import type { TaskCategory } from "@/lib/calendar-types"
@@ -23,9 +23,11 @@ import {
 } from "@/lib/in-cabinet-days"
 import { getAdminCategoryForDate, isSaturdayDate } from "@/lib/visit-category"
 import { snapTimeToFullHour } from "@/lib/time-options"
+import { slotOverlapsTasks } from "@/lib/slot-conflicts"
 import { DayColumn } from "@/components/calendar/DayColumn"
 import { authedJsonGet, authedJsonPost } from "@/lib/auth-client"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
+import { getCalendarViewRange } from "@/lib/calendar-view-range"
 
 type Meeting = {
   id: string
@@ -55,31 +57,24 @@ function toDateStr(date: Date): string {
 
 
 function isUserOwnedMeeting(m: Meeting): boolean {
-  // Patient self-booked visit.
   if (m.createdBy === "guest") return true
 
-  // Admin booked on behalf of a patient — still needs confirmation when date/time changes.
   const hasPatientLink = Boolean(m.userId) || Boolean(m.userEmail?.trim())
   if (hasPatientLink) return true
 
-  // Admin-only / internal visit with no patient attached.
   if (m.createdBy === "admin") return false
-
-  // Backward-compatible fallback for older records that do not have createdBy.
   if (m.lastEditedBy === "guest") return true
-  // Legacy data fallback: if ownership is unknown, prefer confirmation flow
-  // so admin edits don't silently skip guest confirmation.
   return true
 }
 
 export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const today = useMemo(() => startOfDay(new Date()), [])
   const now = useMemo(() => new Date(), [])
-  const maxBookingDate = useMemo(() => addMonths(today, 1), [today])
+  const maxBookingDate = useMemo(() => getCalendarViewRange(today).maxBookingDate, [today])
   const minBookingDateTime = useMemo(() => addHours(now, 2), [now])
   const currentWeekStart = useMemo(() => startOfWeek(today, { weekStartsOn: 1 }), [today])
 
-  // Navigation range spans the full booking window (today → +1 month)
+  // Navigation range spans the full booking window (today → +6 months)
   const minWeekStart = currentWeekStart
   const maxWeekStart = startOfWeek(maxBookingDate, { weekStartsOn: 1 })
 
@@ -178,14 +173,12 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
   const canBookSlotForDay = (dayDate: Date) => (time: string) => {
     if (!isSlotBookable(dayDate, time)) return false
     const dateStr = toDateStr(dayDate)
-    if (isSaturdayDate(dateStr)) {
-      if (!draggingId.current) return true
-      return !doesConflict(dateStr, time, draggingId.current)
-    }
-    const daySlots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
-    if (!daySlots.includes(time)) return false
-    if (!draggingId.current) return true
-    return !doesConflict(dateStr, time, draggingId.current)
+    const dayMeetings = meetings.filter(
+      (meeting) => meeting.date === dateStr && meeting.id !== draggingId.current,
+    )
+    if (slotOverlapsTasks(time, dayMeetings)) return false
+    if (isSaturdayDate(dateStr)) return true
+    return resolveSlotsForDate(dateStr, scheduleSlotRecords).includes(time)
   }
 
   const findNextAvailableSlot = (): { dateStr: string; time: string } | null => {
@@ -199,7 +192,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       const daySlots = resolveSlotsForDate(dateStr, scheduleSlotRecords)
       for (const time of daySlots) {
         if (!isSlotBookable(d, time)) continue
-        if (doesConflict(dateStr, time, "")) continue
+        if (slotOverlapsTasks(time, meetings.filter((meeting) => meeting.date === dateStr))) continue
         return { dateStr, time }
       }
     }
@@ -280,23 +273,14 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
         previousDuration: isUserMeeting ? moving.duration : null,
         date: targetDate,
         time: newTime,
-        ...(isUserMeeting
-          ? {
-              status: "not_confirmed",
-              changeRequestedAt: nowIso,
-            }
-          : {
-              status: null,
-              changeRequestedAt: null,
-            }),
+        status: isUserMeeting ? "confirmed" : null,
+        changeRequestedAt: null,
         lastEditedBy: "admin",
         updatedAt: nowIso,
         ...(moving.date !== targetDate ? { remindedAt: null } : {}),
       })
     )
       .then(() => {
-        // Fire-and-forget n8n trigger for edited meetings.
-        // n8n can use `status === "not_confirmed"` and/or `editedBy` to decide whether to email.
         authedJsonPost("/api/n8n/meetings", {
           event: "meeting.edited",
           editedBy: "admin",
@@ -311,8 +295,8 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           previousDate: isUserMeeting ? moving.date : null,
           previousTime: isUserMeeting ? moving.time : null,
           previousDuration: isUserMeeting ? moving.duration : null,
-          status: isUserMeeting ? "not_confirmed" : null,
-          changeRequestedAt: isUserMeeting ? nowIso : null,
+          status: isUserMeeting ? "confirmed" : null,
+          changeRequestedAt: null,
           updatedAt: nowIso,
         }).catch(() => {})
       })
@@ -391,7 +375,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
       const nowIso = new Date().toISOString()
       const dateTimeChanged = editing.date !== payload.date || (editing.time ?? "") !== (payload.time ?? "")
       const durationChanged = (editing.duration ?? null) !== (payload.duration ?? null)
-      const needsConfirmation = dateTimeChanged || durationChanged
+      const scheduleChanged = dateTimeChanged || durationChanged
       const isUserMeeting = isUserOwnedMeeting(editing)
 
       db.transact([
@@ -399,7 +383,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           title: payload.title,
           description: payload.description,
           category: payload.category,
-          ...(needsConfirmation
+          ...(scheduleChanged
             ? {
                 previousDate: isUserMeeting ? editing.date : null,
                 previousTime: isUserMeeting ? editing.time : null,
@@ -407,13 +391,10 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
                 date: payload.date,
                 time: payload.time,
                 duration: payload.duration,
-                ...(isUserMeeting
-                  ? { status: "not_confirmed", changeRequestedAt: nowIso }
-                  : { status: null, changeRequestedAt: null }),
+                status: isUserMeeting ? "confirmed" : null,
+                changeRequestedAt: null,
               }
             : {
-                // Admin edited a meeting but date/time/duration did not change.
-                // Clear any previous confirmation state so NC label is removed.
                 date: payload.date,
                 time: payload.time,
                 duration: payload.duration,
@@ -445,14 +426,12 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
             date: payload.date,
             time: payload.time,
             duration: payload.duration,
-            status: needsConfirmation && isUserMeeting ? "not_confirmed" : isUserMeeting ? "confirmed" : null,
-            ...(needsConfirmation && isUserMeeting
+            status: isUserMeeting ? "confirmed" : null,
+            ...(scheduleChanged && isUserMeeting
               ? {
                   previousDate: editing.date,
                   previousTime: editing.time,
                   previousDuration: editing.duration,
-                  status: "not_confirmed",
-                  changeRequestedAt: nowIso,
                 }
               : {}),
             updatedAt: nowIso,
@@ -758,6 +737,7 @@ export function AdminCalendar({ onOpenSettings }: { onOpenSettings?: () => void 
           requirePhone={false}
           autoCategoryFromDate
           allowSaturdayDates
+          maxBookableDate={maxBookingDate}
           inCabinetDayRecords={inCabinetDayRecords}
           onClose={() => {
             setModalConfig(null)

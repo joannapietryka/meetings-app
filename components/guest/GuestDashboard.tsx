@@ -31,12 +31,14 @@ import {
   SESSION_DURATION,
 } from "@/lib/calendar-types"
 import { resolveSlotsForDate, type ScheduleSlotRecord } from "@/lib/schedule-slots"
+import { slotOverlapsTasks } from "@/lib/slot-conflicts"
 import {
   resolveInCabinetWeekdaysForDate,
   type InCabinetDayRecord,
 } from "@/lib/in-cabinet-days"
 import { formatInCabinetWeekdaysLabel, getCategoryForDate } from "@/lib/visit-category"
 import { AddTaskModal } from "@/components/calendar/AddTaskModal"
+import { GUEST_BOOKING_HORIZON_MONTHS } from "@/lib/booking-rules"
 import { authedJsonPost, authedJsonPatch, getInstantAuthHeaders } from "@/lib/auth-client"
 
 function meetingDateLocal(dateStr: string): Date {
@@ -287,8 +289,11 @@ export function GuestDashboard() {
       ),
     [todayStr, inCabinetDayRecords],
   )
-  /** Inclusive last day guests may book (30 days from today). */
-  const maxBookingDate = useMemo(() => addDays(today, 30), [today])
+  /** Inclusive last day guests may book (two months from today). */
+  const maxBookingDate = useMemo(
+    () => addMonths(today, GUEST_BOOKING_HORIZON_MONTHS),
+    [today],
+  )
   const minBookingDateTime = useMemo(() => addHours(now, 2), [now])
 
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(today))
@@ -499,10 +504,8 @@ export function GuestDashboard() {
         continue
       }
 
-      const takenSlots = new Set(
-        availabilityMeetings
-          .filter((meeting) => meeting.date === dateStr && meeting.time)
-          .map((meeting) => meeting.time as string),
+      const takenMeetings = availabilityMeetings.filter(
+        (meeting) => meeting.date === dateStr && meeting.time,
       )
 
       const hasFreeSlot = resolveSlotsForDate(dateStr, scheduleSlotRecords).some((slot) => {
@@ -514,7 +517,7 @@ export function GuestDashboard() {
           fitsInDay(slot) &&
           !isBefore(slotDateTime, minBookingDateTime) &&
           !adminBlockedSlots.get(dateStr)?.has(slot) &&
-          !takenSlots.has(slot)
+          !slotOverlapsTasks(slot, takenMeetings)
         )
       })
 
@@ -605,10 +608,13 @@ export function GuestDashboard() {
       slotDateTime.setHours(h, m, 0, 0)
       if (isBefore(slotDateTime, minBookingDateTime)) return false
 
-      return !meetings.some((meeting) => {
-        if (meeting.id === excludeMeetingId) return false
-        return meeting.date === dateStr && meeting.time === time
-      })
+      return !slotOverlapsTasks(
+        time,
+        meetings.filter(
+          (meeting) =>
+            meeting.id !== excludeMeetingId && meeting.date === dateStr && meeting.time,
+        ),
+      )
     },
     [today, maxBookingDate, blockedDateSet, scheduleSlotRecords, adminBlockedSlots, minBookingDateTime],
   )
@@ -684,7 +690,7 @@ export function GuestDashboard() {
 
         const freshNextAvailableDate = findNextAvailableDateForMeetings(latestAvailability)
         if (!freshNextAvailableDate) {
-          alert("Brak wolnych terminów w najbliższych 30 dniach.")
+          alert("Brak wolnych terminów w najbliższych 2 miesiącach.")
           return
         }
 
@@ -734,7 +740,7 @@ export function GuestDashboard() {
     }
 
     if (!isDateInBookingWindow(day, today, maxBookingDate)) {
-      alert("Rezerwacje są możliwe wyłącznie na najbliższe 30 dni.")
+      alert("Rezerwacje są możliwe wyłącznie na najbliższe 2 miesiące.")
       return
     }
 
@@ -899,9 +905,9 @@ export function GuestDashboard() {
             <div className="min-w-0">
               <h1 className="text-slate-800 font-bold text-lg font-sans leading-tight">Moje wizyty</h1>
               <p className="text-slate-800 text-[11px] sm:text-xs font-sans leading-snug">
-                <span className="sm:hidden">1 wizyta/tydz., 4/mies., 30 dni do przodu</span>
+                <span className="sm:hidden">1 wizyta/tydz., 4/mies., 2 miesiące do przodu</span>
                 <span className="hidden sm:inline">
-                  Maks. 1 wizyta w tygodniu, 4 w miesiącu, tylko dni robocze i 30 dni do przodu.
+                  Maks. 1 wizyta w tygodniu, 4 w miesiącu, tylko dni robocze i 2 miesiące do przodu.
                 </span>
               </p>
               <p className="hidden sm:block text-slate-600 text-xs font-sans mt-1">

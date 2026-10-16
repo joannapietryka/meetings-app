@@ -13,6 +13,7 @@ import {
   SESSION_DURATION,
 } from "@/lib/calendar-types"
 import { snapTimeToFullHour } from "@/lib/time-options"
+import { slotOverlapsTasks } from "@/lib/slot-conflicts"
 import { TaskCard } from "./TaskCard"
 
 interface DayColumnProps {
@@ -182,10 +183,9 @@ export function DayColumn({
   const untimedTasks = tasks.filter((t) => !t.time)
 
   // Slots with no existing booking → rendered as "Available" ghost blocks
-  const bookedTimes = new Set(timedTasks.map((t) => t.time))
   const availableSlots = saturdayAdminMode
     ? []
-    : scheduledSlots.filter((slot) => !bookedTimes.has(slot))
+    : scheduledSlots.filter((slot) => !slotOverlapsTasks(slot, timedTasks))
 
   const handleSaturdayGridClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!saturdayAdminMode || isLocked) return
@@ -243,7 +243,7 @@ export function DayColumn({
             isBlocked ? "text-rose-600" : today ? "text-white" : isLocked ? "text-slate-500" : "text-slate-700"
           }`}
         >
-          {dayNum}
+          {format(date, "d.MM")}
         </p>
         {saturdayAdminMode && onSaturdayCollapse && (
           <button

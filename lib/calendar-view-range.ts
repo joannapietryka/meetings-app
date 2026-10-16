@@ -7,10 +7,13 @@ export type CalendarViewRange = {
   maxBookingDateStr: string
 }
 
-/** Bookable admin calendar window: today through one month ahead. */
+/** How far ahead the admin calendar can be viewed and booked. */
+export const ADMIN_CALENDAR_HORIZON_MONTHS = 6
+
+/** Bookable admin calendar window: today through six months ahead. */
 export function getCalendarViewRange(now: Date = new Date()): CalendarViewRange {
   const today = startOfDay(now)
-  const maxBookingDate = addMonths(today, 1)
+  const maxBookingDate = addMonths(today, ADMIN_CALENDAR_HORIZON_MONTHS)
   return {
     today,
     maxBookingDate,

@@ -28,7 +28,7 @@ type BookingContext = {
   inCabinetDayRecords: InCabinetDayRecord[]
   blockedDates: Set<string>
   blockedSlots: Map<string, Set<string>>
-  allMeetings: Array<{ id: string; date: string; time?: string }>
+  allMeetings: Array<{ id: string; date: string; time?: string; duration?: number | null }>
   userMeetings: BookingMeetingRef[]
 }
 
@@ -77,11 +77,7 @@ async function loadBookingContext(user: Pick<User, "id" | "email">): Promise<Boo
     inCabinetDayRecords: result.bookingSettings ?? [],
     blockedDates,
     blockedSlots,
-    allMeetings: (result.meetings ?? []).filter((m) => m.date && m.time) as Array<{
-      id: string
-      date: string
-      time?: string
-    }>,
+    allMeetings: (result.meetings ?? []).filter((m) => m.date && m.time),
     userMeetings,
   }
 }
